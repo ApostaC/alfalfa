@@ -276,7 +276,10 @@ Optional<RasterHandle> YUV4MPEGReader::get_next_frame()
 
   string frame_header = fd_.getline();
   if ( fd_.eof() ) {
-    return {};
+    fd_.reset_offset();
+    fd_.getline();
+    frame_header = fd_.getline();
+    //return {};
   }
 
   if ( frame_header != "FRAME" ) {

@@ -80,6 +80,12 @@ public:
   unsigned int read_count( void ) const { return read_count_; }
   unsigned int write_count( void ) const { return write_count_; }
 
+  void reset_offset() 
+  {
+    SystemCall("lseek", lseek(fd_, 0, SEEK_SET));
+    eof_ = false;
+  }
+
   /* disallow copying or assigning */
   FileDescriptor( const FileDescriptor & other ) = delete;
   const FileDescriptor & operator=( const FileDescriptor & other ) = delete;
