@@ -56,7 +56,7 @@ const SafeRaster & SafeReferences::get( reference_frame reference_id ) const
 
 MutableSafeRasterHandle SafeReferences::load( const VP8Raster & source )
 {
-  MutableSafeRasterHandle target( source.display_width(), source.display_height() );
+  MutableSafeRasterHandle target( source.width(), source.height() );
   target.get().copy_raster( source );
   return target;
 }
