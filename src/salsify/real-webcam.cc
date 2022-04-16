@@ -34,6 +34,7 @@
 
 #include "camera.hh"
 #include "display.hh"
+#include "sdl.hh"
 
 using namespace std;
 
@@ -55,6 +56,7 @@ int main( int argc, char *argv[] )
   string camera_device = "/dev/video0";
   string pixel_format = "NV12";
   bool fullscreen = false;
+  (void)fullscreen;
 
   const option command_line_options[] = {
     { "device",     required_argument, nullptr, 'd' },
@@ -81,14 +83,16 @@ int main( int argc, char *argv[] )
 
   Camera camera { 854, 480, PIXEL_FORMAT_STRS.at( pixel_format ), camera_device };
 
-  RasterHandle r { MutableRasterHandle{ 854, 480 } };
-  VideoDisplay display { r, fullscreen };
+  //RasterHandle r { MutableRasterHandle{ 854, 480 } };
+  //VideoDisplay display { r, fullscreen };
+  SDLDisplay display(854, 480);
 
   while ( true ) {
     auto raster = camera.get_next_frame();
 
     if ( raster.initialized() ) {
-      display.draw( raster.get() );
+      //display.draw( raster.get() );
+      display.show_frame(raster.get());
     }
   }
 

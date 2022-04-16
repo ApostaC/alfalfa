@@ -32,6 +32,7 @@
 
 #include "yuv4mpeg.hh"
 #include "paranoid.hh"
+#include "sdl.hh"
 
 using namespace std;
 
@@ -65,8 +66,10 @@ int main( int argc, char *argv[] )
 
   auto next_frame_is_due = chrono::system_clock::now();
 
+  SDLDisplay display(854, 480);
+
   bool initialized = false;
-  while ( true ) {
+  while ( not display.signal_quit() ) {
     /* wait until next frame is due */
     this_thread::sleep_until( next_frame_is_due );
     next_frame_is_due += interval_between_frames;
@@ -80,13 +83,15 @@ int main( int argc, char *argv[] )
     /* send the file header if we haven't already */
     if ( not initialized ) {
       auto file_header = YUV4MPEGHeader( raster.get() );
+      (void)file_header;
       file_header.fps_numerator = frames_per_second;
       file_header.fps_denominator = 1;
-      stdout.write( file_header.to_string() );
+      //stdout.write( file_header.to_string() );
       initialized = true;
     }
 
     /* send the frame */
-    YUV4MPEGFrameWriter::write( raster.get(), stdout );
+    //YUV4MPEGFrameWriter::write( raster.get(), stdout );
+    display.show_frame(raster.get());   
   }
 }

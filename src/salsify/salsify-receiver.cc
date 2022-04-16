@@ -47,6 +47,7 @@
 #include "display.hh"
 #include "paranoid.hh"
 #include "procinfo.hh"
+#include "sdl.hh"
 
 using namespace std;
 using namespace std::chrono;
@@ -102,18 +103,20 @@ condition_variable cv;
 void display_task( const VP8Raster & example_raster, bool fullscreen )
 {
   //VideoDisplay display { example_raster, fullscreen };
+  SDLDisplay display {example_raster.display_width(), example_raster.display_height()};
 
-  (void)(example_raster);
   (void)(fullscreen);
-  while( true ) {
+  while( not display.signal_quit() ) {
     unique_lock<mutex> lock( mtx );
     cv.wait( lock, []() { return not display_queue.empty(); } );
 
     while( not display_queue.empty() ) {
       //display.draw( display_queue.front() );
+      display.show_frame(display_queue.front().get());
       display_queue.pop();
     }
   }
+  exit(EXIT_SUCCESS);
 }
 
 void enqueue_frame( FramePlayer & player, const Chunk & frame )

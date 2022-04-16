@@ -172,7 +172,7 @@ size_t target_size( uint32_t avg_delay, const uint64_t last_acked, const uint64_
 void usage( const char *argv0 )
 {
   cerr << "Usage: " << argv0
-       << " [-m,--mode MODE] [-d, --device CAMERA] [-p, --pixfmt PIXEL_FORMAT]"
+       << " [-m,--mode MODE] [-d, --device CAMERA] [-p, --pixfmt PIXEL_FORMAT] [-f, --file Y4M FILE]"
        << " [-u,--update-rate RATE] [--log-mem-usage] HOST PORT CONNECTION_ID" << endl
        << endl
        << "Accepted MODEs are s1, s2 (default), conventional." << endl;
@@ -201,6 +201,7 @@ int main( int argc, char *argv[] )
   /* camera settings */
   string camera_device = "/dev/video0";
   string pixel_format = "NV12";
+  string input_file = "";
   size_t update_rate __attribute__((unused)) = 1;
   OperationMode operation_mode = OperationMode::S2;
   bool log_mem_usage = false;
@@ -208,6 +209,7 @@ int main( int argc, char *argv[] )
   const option command_line_options[] = {
     { "mode",          required_argument, nullptr, 'm' },
     { "device",        required_argument, nullptr, 'd' },
+    { "file",          required_argument, nullptr, 'f' },
     { "pixfmt",        required_argument, nullptr, 'p' },
     { "update-rate",   required_argument, nullptr, 'u' },
     { "log-mem-usage", no_argument,       nullptr, 'M' },
@@ -233,6 +235,10 @@ int main( int argc, char *argv[] )
       else if ( strcmp( optarg, "s2" ) == 0 ) { operation_mode = OperationMode::S2; }
       else if ( strcmp( optarg, "conventional" ) == 0 ) { operation_mode = OperationMode::Conventional; }
       else { throw runtime_error( "unknown operation mode" ); }
+      break;
+
+    case 'f':
+      input_file = optarg;
       break;
 
     case 'u':
@@ -281,10 +287,15 @@ int main( int argc, char *argv[] )
   }
 
   /* camera device */
-  Camera camera { 854, 480, PIXEL_FORMAT_STRS.at( pixel_format ), camera_device };
+  //Optional<Camera> camera;
+  //camera.initialize(854, 480, PIXEL_FORMAT_STRS.at( pixel_format ), camera_device);
+  if (input_file.length() == 0) {
+    throw runtime_error("Must specify a input y4m file");
+  } 
+  YUV4MPEGReader reader {input_file};
 
   /* construct the encoder */
-  Encoder base_encoder { camera.display_width(), camera.display_height(),
+  Encoder base_encoder { reader.display_width(), reader.display_height(),
                          false /* two-pass */, REALTIME_QUALITY };
 
   const uint32_t initial_state = base_encoder.minihash();
@@ -343,7 +354,7 @@ int main( int argc, char *argv[] )
     [&]() -> Result {
       encode_start_pipe.second.read();
 
-      last_raster = camera.get_next_frame();
+      last_raster = reader.get_next_frame();
 
       if ( not last_raster.initialized() ) {
         return { ResultType::Exit, EXIT_FAILURE };
@@ -560,7 +571,7 @@ int main( int argc, char *argv[] )
 
       for ( auto & out_future : encode_outputs ) {
         if ( out_future.valid() ) {
-          good_outputs.push_back( move( out_future.get() ) );
+          good_outputs.push_back(  out_future.get()  );
         }
       }
 
@@ -678,7 +689,7 @@ int main( int argc, char *argv[] )
       last_acked = this_ack_seq;
       avg_delay = ack.avg_delay();
       receiver_last_acked_state.reset( ack.current_state() );
-      receiver_complete_states = move( ack.complete_states() );
+      receiver_complete_states =  ack.complete_states() ;
 
       return ResultType::Continue;
     } )
