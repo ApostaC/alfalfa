@@ -111,7 +111,7 @@ inline int SystemCall( const char * s_attempt, const int return_value )
     return return_value;
   }
 
-  throw unix_error( s_attempt );
+  throw unix_error( s_attempt, return_value );
 }
 
 inline int SystemCall( const std::string & s_attempt, const int return_value )

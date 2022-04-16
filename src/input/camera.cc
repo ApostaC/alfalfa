@@ -87,11 +87,13 @@ Camera::Camera( const uint16_t width, const uint16_t height,
   SystemCall( "buffer request", ioctl( camera_fd_.fd_num(), VIDIOC_REQBUFS, &buf_request ) );
 
   if ( buf_request.count != NUM_BUFFERS ) {
-    throw runtime_error( "couldn't get enough video4linux2 buffers" );
+    cerr << "Warning: requested " << NUM_BUFFERS << "V4L2 buffers but only "
+         << buf_request.count << " were approved" << endl;
+    //throw runtime_error( "couldn't get enough video4linux2 buffers" );
   }
 
   /* allocate buffers */
-  for ( unsigned int i = 0; i < NUM_BUFFERS; i++ ) {
+  for ( unsigned int i = 0; i < buf_request.count; i++ ) {
     v4l2_buffer buffer_info;
     buffer_info.type = capture_type;
     buffer_info.memory = V4L2_MEMORY_MMAP;

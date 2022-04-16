@@ -101,14 +101,16 @@ condition_variable cv;
 
 void display_task( const VP8Raster & example_raster, bool fullscreen )
 {
-  VideoDisplay display { example_raster, fullscreen };
+  //VideoDisplay display { example_raster, fullscreen };
 
+  (void)(example_raster);
+  (void)(fullscreen);
   while( true ) {
     unique_lock<mutex> lock( mtx );
     cv.wait( lock, []() { return not display_queue.empty(); } );
 
     while( not display_queue.empty() ) {
-      display.draw( display_queue.front() );
+      //display.draw( display_queue.front() );
       display_queue.pop();
     }
   }

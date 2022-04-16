@@ -79,9 +79,9 @@ int main( int argc, char *argv[] )
     }
   }
 
-  Camera camera { 1280, 720, PIXEL_FORMAT_STRS.at( pixel_format ), camera_device };
+  Camera camera { 854, 480, PIXEL_FORMAT_STRS.at( pixel_format ), camera_device };
 
-  RasterHandle r { MutableRasterHandle{ 1280, 720 } };
+  RasterHandle r { MutableRasterHandle{ 854, 480 } };
   VideoDisplay display { r, fullscreen };
 
   while ( true ) {
