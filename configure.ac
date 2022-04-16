@@ -97,6 +97,7 @@ AC_SUBST([ASFLAGS])
 
 # Checks for libraries.
 PKG_CHECK_MODULES([X264], [x264])
+PKG_CHECK_MODULES([SDL], [sdl2])
 PKG_CHECK_MODULES([ZLIB], [zlib])
 AC_SEARCH_LIBS([jpeg_CreateDecompress], [jpeg], , [AC_MSG_ERROR([Unable to find libjpeg.])])
 
