@@ -32,6 +32,8 @@
 #include <sstream>
 #include <utility>
 #include <algorithm>
+#include <chrono>
+#include <thread>
 
 using namespace std;
 
@@ -306,6 +308,18 @@ Optional<RasterHandle> YUV4MPEGReader::get_next_frame()
   /* edge-extend the raster */
   edge_extend( raster.get() );
 
+  /* compute sleep time using fps */
+  auto target_frame_ms = last_frame_timestamp_ms_ + 1000 / fps_;
+  auto now_ms = timestamp_ms();
+  if (last_frame_timestamp_ms_ != 0 and now_ms > target_frame_ms) { // cannot catch up
+    cerr << "Cannot catch up: expected frame time is " << target_frame_ms 
+         << " but now is " << now_ms << endl;
+  }
+  else {
+    auto sleep_time_ms = target_frame_ms - now_ms;
+    this_thread::sleep_for(chrono::milliseconds(sleep_time_ms));
+  }
+  last_frame_timestamp_ms_ = now_ms;
   return { move( raster ) };
 }
 

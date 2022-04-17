@@ -293,6 +293,7 @@ int main( int argc, char *argv[] )
     throw runtime_error("Must specify a input y4m file");
   } 
   YUV4MPEGReader reader {input_file};
+  reader.set_fps(30);
 
   /* construct the encoder */
   Encoder base_encoder { reader.display_width(), reader.display_height(),

@@ -36,6 +36,7 @@
 #include "raster_handle.hh"
 #include "file_descriptor.hh"
 #include "vp8_raster.hh"
+#include "timestamp.hh"
 
 class YUV4MPEGHeader
 {
@@ -72,10 +73,15 @@ private:
 
   static std::pair< size_t, size_t > parse_fraction( const std::string & fraction_str );
 
+  uint64_t last_frame_timestamp_ms_ {0};
+  uint32_t fps_ {30};
+
 public:
   YUV4MPEGReader( FileDescriptor && fd );
   YUV4MPEGReader( const std::string & filename );
   Optional<RasterHandle> get_next_frame() override;
+
+  void set_fps(uint32_t fps) { fps_ = fps; }
 
   uint16_t display_width() override { return header_.width; }
   uint16_t display_height() override { return header_.height; }
