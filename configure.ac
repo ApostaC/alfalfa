@@ -135,6 +135,7 @@ AC_LANG_POP(C++)
 AC_CONFIG_FILES([Makefile
                  src/Makefile
                  src/util/Makefile
+                 src/components/Makefile
                  src/decoder/Makefile
                  src/display/Makefile
                  src/input/Makefile

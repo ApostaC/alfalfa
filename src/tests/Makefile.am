@@ -1,10 +1,11 @@
-AM_CPPFLAGS = -I$(srcdir)/../util -I$(srcdir)/../decoder -I$(srcdir)/../input -I$(srcdir)/../encoder $(X264_CFLAGS) $(CXX11_FLAGS)
+AM_CPPFLAGS = -I$(srcdir)/../util -I$(srcdir)/../components -I$(srcdir)/../net -I$(srcdir)/../decoder -I$(srcdir)/../input -I$(srcdir)/../encoder $(X264_CFLAGS) $(CXX11_FLAGS)
 AM_CXXFLAGS = $(PICKY_CXXFLAGS) $(NODEBUG_CXXFLAGS)
 
-LDADD = ../decoder/libalfalfadecoder.a ../encoder/libalfalfaencoder.a ../util/libalfalfautil.a $(X264_LIBS)
+LDADD = ../components/libalfalfacomp.a ../net/libnet.a ../decoder/libalfalfadecoder.a ../encoder/libalfalfaencoder.a ../util/libalfalfautil.a $(X264_LIBS)
 
 check_PROGRAMS = extract-key-frames decode-to-stdout encode-loopback roundtrip \
-                 ivfcopy ivfcompare serdes-test
+                 ivfcopy ivfcompare serdes-test 
+bin_PROGRAMS = test_components
 
 extract_key_frames_SOURCES = extract-key-frames.cc
 decode_to_stdout_SOURCES = decode-to-stdout.cc
@@ -13,6 +14,7 @@ roundtrip_SOURCES = roundtrip.cc
 ivfcopy_SOURCES = ivfcopy.cc
 ivfcompare_SOURCES = ivfcompare.cc
 serdes_test_SOURCES = serdes-test.cc
+test_components_SOURCES = test_components.cc
 
 dist_check_SCRIPTS = fetch-vectors.test fetch-encoder-vectors.test decoding.test \
                      roundtrip-verify.test \
