@@ -24,6 +24,6 @@ uint64_t Timerfd::read_expirations()
   if (SystemCall("Timerfd::read_expirations", ::read(fd_num(), &num_exp, sizeof(num_exp))) != sizeof(num_exp)) {
     throw runtime_error("Read error in Timerfd::read_expirations");
   }
-
+  register_read();
   return num_exp;
 }
