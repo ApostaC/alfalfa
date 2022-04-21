@@ -50,6 +50,7 @@ private:
   uint16_t fragment_no_;
   uint16_t fragments_in_this_frame_;
   uint32_t time_since_last_; /* microseconds */
+  uint32_t send_timestamp_ms_; /* milliseconds */
 
   std::string payload_;
 
@@ -60,6 +61,9 @@ public:
   static std::string put_header_field( const uint32_t n );
   static std::string put_header_field( const uint64_t n );
 
+  /* setters */
+  void set_send_timestamp_ms(uint32_t send_timestamp_ms) { send_timestamp_ms_ = send_timestamp_ms; }
+
   /* getters */
   bool valid() const { return valid_; }
   uint16_t connection_id() const { return connection_id_; }
@@ -69,6 +73,7 @@ public:
   uint16_t fragment_no() const { return fragment_no_; }
   uint16_t fragments_in_this_frame() const { return fragments_in_this_frame_; }
   uint32_t time_since_last() const { return time_since_last_; }
+  uint32_t send_timestamp_ms() const { return send_timestamp_ms_; }
   const std::string & payload() const { return payload_; }
 
   /* construct outgoing Packet */
@@ -79,7 +84,7 @@ public:
           const uint32_t frame_no,
           const uint16_t fragment_no,
           const uint16_t time_to_next,
-          size_t & next_fragment_start );
+          size_t & next_fragment_start);
 
   /* construct incoming Packet */
   Packet( const Chunk & str );
