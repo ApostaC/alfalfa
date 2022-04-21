@@ -1,7 +1,7 @@
 AM_CPPFLAGS = -I$(srcdir)/../util -I$(srcdir)/../components -I$(srcdir)/../net -I$(srcdir)/../decoder -I$(srcdir)/../input -I$(srcdir)/../encoder $(X264_CFLAGS) $(CXX11_FLAGS)
-AM_CXXFLAGS = $(PICKY_CXXFLAGS) $(NODEBUG_CXXFLAGS)
+AM_CXXFLAGS = $(PICKY_CXXFLAGS) $(NODEBUG_CXXFLAGS) -lpthread
 
-LDADD = ../components/libalfalfacomp.a ../net/libnet.a ../decoder/libalfalfadecoder.a ../encoder/libalfalfaencoder.a ../util/libalfalfautil.a $(X264_LIBS)
+LDADD = ../components/libalfalfacomp.a ../net/libnet.a ../decoder/libalfalfadecoder.a ../encoder/libalfalfaencoder.a ../util/libalfalfautil.a $(X264_LIBS) 
 
 check_PROGRAMS = extract-key-frames decode-to-stdout encode-loopback roundtrip \
                  ivfcopy ivfcompare serdes-test 

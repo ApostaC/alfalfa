@@ -1,7 +1,11 @@
+#include <thread>
+#include <cassert>
 #include <iostream>
 #include "comp_encoder.hh"
 #include "comp_decoder.hh"
+#include "congestion_control.hh"
 #include "frame_observer.hh"
+#include "transmission.hh"
 
 using namespace std; 
 
@@ -60,7 +64,47 @@ bool test_basic_encoder_decoder()
   assert(arrival_time.size() == 2);
   assert(arrival_time.at(1) == frame1.packets().size());
   assert(arrival_time.at(2) == frame2.packets().size());
+
+  auto packet = frame1.packets()[0];
+  uint32_t send_ms = 14214;
+  packet.set_send_timestamp_ms(send_ms);
+  cerr << "send_timestamp_ms for origin packet is: " << packet.send_timestamp_ms() << endl;
+  assert(packet.send_timestamp_ms() == send_ms);
+
+  auto str = packet.to_string();
+  Packet new_pkt {str};
+  cerr << "send_timestamp_ms for rec packet is: " << new_pkt.send_timestamp_ms() << endl;
+  assert(new_pkt.send_timestamp_ms() == send_ms);
   out_green(cerr) << "-------------- PASSED: basic encoder decoder ----------------"; out_normal(cerr) << endl;
+  return true;
+}
+
+bool test_trans()
+{
+  out_green(cerr) << "============== test: trans ================="; out_normal(cerr) << endl;
+
+  uint32_t fps = 25;
+  BasicEncoder encoder(500 * 125, 25);
+  NonBlockingDecoder decoder;
+  DumbCongestionControl dumbCC;
+  auto frame_obs = std::make_shared<FrameArrivalTimeObserver>();
+  decoder.add_frame_observer(frame_obs);
+
+  uint16_t port = 54123;
+  std::string ip = "127.0.0.1";
+  auto sender = std::make_shared<TransSender>(Address(ip, port), fps, std::ref(dumbCC), std::ref(encoder));
+  auto receiver = std::make_shared<TransReceiver>(port, decoder);
+
+  dumbCC.add_observer(sender);
+
+  //sender->start();
+  std::thread receiver_thread([&](){receiver->start();});
+  std::thread sender_thread([&](){sender->start();});
+
+  receiver_thread.join();
+  sender_thread.join();
+
+  out_green(cerr) << "-------------- PASSED: trans ----------------"; out_normal(cerr) << endl;
   return true;
 }
 
@@ -72,4 +116,5 @@ int main(int argc, char *argv[])
   out_normal(cerr) << endl;
 
   test_basic_encoder_decoder();
+  test_trans();
 }
