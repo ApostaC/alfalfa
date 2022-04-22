@@ -65,10 +65,13 @@ TransSender::TransSender(const Address & peer_addr, uint32_t fps,
           uint32_t now_ms = timestamp_ms();
           // TODO: change the frame's interval here (need to matain last_encoded_frame_timestamp_ms_)
           auto frame = this->encoder_.encode_next_frame(now_ms);
-          auto packets = frame.packets();
-          this->data_queue_.insert(this->data_queue_.end(), make_move_iterator(packets.begin()),
-                                   make_move_iterator(packets.end()));
-          packets.clear();
+          if (frame.initialized())
+          {
+            auto packets = frame.get().packets();
+            this->data_queue_.insert(this->data_queue_.end(), make_move_iterator(packets.begin()),
+                                     make_move_iterator(packets.end()));
+            packets.clear();
+          }
           return ResultType::Continue;
         }));
 
@@ -126,7 +129,7 @@ void TransSender::start()
 {
   pacer_.start_pacer(timestamp_ms());
   while (true) {
-    uint32_t ttw = min(pacer_.ms_until_ready(), 1u);
+    uint32_t ttw = min(pacer_.ms_until_nextcheck(), 1u);
     const auto poll_result = poller_.poll(ttw);
     if (poll_result.result == Poller::Result::Type::Exit) {
       if (poll_result.exit_status) {
@@ -160,9 +163,11 @@ TransReceiver::TransReceiver(const uint16_t port, DecoderInterface & decoder)
         auto delay = now_ms - packet.send_timestamp_ms();
         
         this->decoder_.incoming_packet(now_ms, packet);
-        AckPacket(packet.connection_id(), packet.frame_no(), packet.fragment_no(), 
+        AckPacket ack(packet.connection_id(), packet.frame_no(), packet.fragment_no(), 
             /* delay */ delay, 
-            /* curr state */ 0, /* complete state */ {}).sendto(this->socket_, new_datagram.source_address);
+            /* curr state */ 0, /* complete state */ {}); 
+        ack.set_arrive_time(now_ms);
+        ack.sendto(this->socket_, new_datagram.source_address);
         return ResultType::Continue;
       }));
 }

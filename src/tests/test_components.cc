@@ -41,9 +41,9 @@ bool test_basic_encoder_decoder()
   auto frame_obs = std::make_shared<FrameArrivalTimeObserver>();
   decoder.add_frame_observer(frame_obs);
 
-  auto frame1 = encoder.encode_next_frame(0);
+  auto frame1 = move(encoder.encode_next_frame(0).get());
   encoder.set_target_bitrate(1000 * 125);
-  auto frame2 = encoder.encode_next_frame(40);
+  auto frame2 = move(encoder.encode_next_frame(40).get());
 
   assert(frame1.frame_no() == 1);
   assert(frame2.frame_no() == 2);
@@ -86,16 +86,17 @@ bool test_trans()
   uint32_t fps = 25;
   BasicEncoder encoder(500 * 125, 25);
   NonBlockingDecoder decoder;
-  DumbCongestionControl dumbCC;
+  //DumbCongestionControl cc;
+  SalsifyCongestionControl cc(100, fps);
   auto frame_obs = std::make_shared<FrameArrivalTimeObserver>();
   decoder.add_frame_observer(frame_obs);
 
   uint16_t port = 54123;
   std::string ip = "127.0.0.1";
-  auto sender = std::make_shared<TransSender>(Address(ip, port), fps, std::ref(dumbCC), std::ref(encoder));
+  auto sender = std::make_shared<TransSender>(Address(ip, port), fps, std::ref(cc), std::ref(encoder));
   auto receiver = std::make_shared<TransReceiver>(port, decoder);
 
-  dumbCC.add_observer(sender);
+  cc.add_observer(sender);
 
   //sender->start();
   std::thread receiver_thread([&](){receiver->start();});

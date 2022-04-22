@@ -11,7 +11,7 @@ BasicEncoder::BasicEncoder(uint32_t init_bitrate_byteps, uint16_t fps)
 {
 }
 
-FragmentedFrame BasicEncoder::encode_next_frame(uint32_t curr_timestamp_ms)
+Optional<FragmentedFrame> BasicEncoder::encode_next_frame(uint32_t curr_timestamp_ms)
 {
   frame_id_ += 1;
   (void)(curr_timestamp_ms); // suppress unused
@@ -21,6 +21,9 @@ FragmentedFrame BasicEncoder::encode_next_frame(uint32_t curr_timestamp_ms)
   auto multiplier = dis(e);
   uint32_t base_size_bytes = target_bitrate_byteps_ * 1 / fps_;
   uint32_t real_bytes = std::floor(multiplier * base_size_bytes);
+  if (real_bytes == 0) {
+    return {};
+  }
   std::vector<uint8_t> data;
   data.resize(real_bytes);
   // note: time_to_next_frame is in MICRO-SECONDS (us)

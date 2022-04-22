@@ -35,7 +35,13 @@ public:
   void on_packet_sent(uint32_t timestamp_ms, size_t pkt_size);
 
   // how long should we wait until ready
-  uint32_t ms_until_ready() const { return budget_ * 1000 / pacing_rate_byteps_; }
+  uint32_t ms_until_nextcheck() const 
+  { 
+    if (pacing_rate_byteps_ > 0) {
+      return std::min(budget_ * 1000 / pacing_rate_byteps_, 10u);
+    }
+    return 10;
+  }
 
   // query if it's ready to send
   bool ready_to_send(uint32_t now_ms);
