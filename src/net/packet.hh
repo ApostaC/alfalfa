@@ -165,7 +165,8 @@ public:
       frame_no_( other.frame_no_ ),
       fragments_in_this_frame_( other.fragments_in_this_frame_ ),
       fragments_( move( other.fragments_ ) ),
-      remaining_fragments_( other.remaining_fragments_ )
+      remaining_fragments_( other.remaining_fragments_ ),
+      is_key_frame_( other.is_key_frame_ )
   {}
 };
 

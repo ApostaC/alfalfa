@@ -114,7 +114,7 @@ void SalsifyCongestionControl::update_estimation(uint32_t recv_timestamp_ms, uin
 
 void SalsifyCongestionControl::post_updates()
 {
-  assert(tao_ms_ > 0);
+  assert(tao_ms_ >= 0);
   auto i32_tao_ms = max(1, static_cast<int>(tao_ms_)); // at least 1
   int num = d_ms_ / i32_tao_ms - ni_;
   num = max(num, 0); 

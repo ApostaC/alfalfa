@@ -38,4 +38,22 @@ public:
   virtual void incoming_packet(uint32_t timestamp_ms, const Packet &pkt) override;
 };
 
+/**
+ * wait until the current frame has arrived or an I frame has arrived!
+ */
+class BlockingDecoder : public DecoderInterface
+{
+private:
+  std::map<uint32_t, FragmentedFrame> frames_ {};
+  uint32_t already_decoded_no_ {0};
+
+private:
+  void on_frame_complete(uint32_t timestamp_ms, const FragmentedFrame & frame);
+
+public:
+  BlockingDecoder() = default;
+
+  virtual void incoming_packet(uint32_t timestamp_ms, const Packet & pkt);
+};
+
 #endif

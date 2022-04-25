@@ -7,6 +7,10 @@
 #include "frame_observer.hh"
 #include "transmission.hh"
 
+#ifdef NDEBUG
+#undef NDEBUG
+#endif
+
 using namespace std; 
 
 ostream & out_green(ostream & out)
@@ -62,8 +66,9 @@ bool test_basic_encoder_decoder()
   const auto & arrival_time = frame_obs->arrival_time();
   (void)(arrival_time);
   assert(arrival_time.size() == 2);
-  assert(arrival_time.at(1) == frame1.packets().size());
-  assert(arrival_time.at(2) == frame2.packets().size());
+  cerr << arrival_time.at(1) << " " << arrival_time.at(2) << endl;
+  assert(arrival_time.at(1) == frame1.packets().size() - 1);
+  assert(arrival_time.at(2) == frame2.packets().size() - 1 + 40);
 
   auto packet = frame1.packets()[0];
   uint32_t send_ms = 14214;
@@ -91,7 +96,7 @@ bool test_rtx_mgr()
   RTXManager rtx_mgr;
 
   // send all the packet
-  uint32_t ts = 0;
+  uint32_t ts = 1;
   for(auto & pkt: pkts) {
     pkt.set_send_timestamp_ms(ts);
     rtx_mgr.on_packet_sent(ts, pkt);
@@ -120,6 +125,61 @@ bool test_rtx_mgr()
   cerr << "Got " << rtx_queue.size() << " rtx packets!" << endl;
   assert(rtx_queue.size() > 0);
   out_green(cerr) << "-------------- PASSED: rtx_mgr ----------------"; out_normal(cerr) << endl;
+  return true;
+}
+
+bool test_blocking_decoder()
+{
+  out_green(cerr) << "============== test: blocking decoder ================="; out_normal(cerr) << endl;
+  BasicEncoder encoder(500 * 125, 25);
+  encoder.set_gop(3);
+  std::vector<FragmentedFrame> frames;
+  for (int i=0;i<4;i++) {
+    frames.emplace_back(move(encoder.encode_next_frame(0).get()));
+    cerr << "Frame " << frames.back().frame_no() << " is_key_frame = " << frames.back().is_key_frame() 
+         << " number of packets: " << frames.back().fragments_in_this_frame() << endl;
+    if (i % 3 == 0) {
+      assert(frames.back().is_key_frame());
+    }
+  }
+
+  BlockingDecoder decoder;
+  auto obs = std::make_shared<FrameArrivalTimeObserver>();
+  decoder.add_frame_observer(obs);
+
+  // ts = 0, frame 1 is not complete
+  decoder.incoming_packet(0, frames[0].packets()[0]);
+
+  // ts = 1, frame 2 is complete
+  for (auto pkt : frames[1].packets()) {
+    decoder.incoming_packet(1, pkt);
+  }
+
+  // ts = 2, frame 1 is complete
+  for (auto pkt : frames[0].packets()) {
+    decoder.incoming_packet(2, pkt);
+  }
+
+  // ts = 3, frame 3 is incomplete
+  decoder.incoming_packet(3, frames[2].packets()[0]);
+
+  // ts = 4, frame 4 is incomplete
+  for (auto pkt : frames[3].packets()) {
+    decoder.incoming_packet(4, pkt);
+  }
+
+
+  auto final_result = obs->arrival_time();
+  decltype(final_result) expected_result{{1,2}, {2,2}, {4,4}};
+  assert(final_result.size() == expected_result.size());
+  for(auto ent: final_result) {
+    assert(expected_result.count(ent.first) > 0);
+    auto exp_res = expected_result[ent.first];
+    cerr << "Frame " << ent.first << " arrives at " << ent.second << endl;
+    cerr << "expected_result " << ent.first << " arrives at " << exp_res << endl;
+    assert(exp_res == ent.second);
+  }
+  out_green(cerr) << "-------------- PASSED: blocking decoder ----------------"; out_normal(cerr) << endl;
   return true;
 }
 
@@ -162,6 +222,7 @@ int main(int argc, char *argv[])
   out_normal(cerr) << endl;
 
   test_basic_encoder_decoder();
+  test_blocking_decoder();
   test_rtx_mgr();
   test_trans();
 }

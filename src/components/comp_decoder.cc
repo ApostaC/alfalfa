@@ -58,3 +58,56 @@ void NonBlockingDecoder::incoming_packet(uint32_t timestamp_ms, const Packet & p
   }
   
 }
+
+void BlockingDecoder::on_frame_complete(uint32_t timestamp_ms, const FragmentedFrame & frame)
+{
+  // erase all the previous partial frames
+  auto frame_no = frame.frame_no();
+  for(auto i = already_decoded_no_; i < frame_no; i++) {
+    frames_.erase(i);
+  }
+
+  // update state
+  already_decoded_no_ = frame.frame_no();
+
+  // update observers
+  for (auto obs : frame_observers_) {
+    obs->new_complete_frame(timestamp_ms, frame);
+  }
+
+  // remove this frame from the queue
+  frames_.erase(frame_no);
+}
+
+void BlockingDecoder::incoming_packet(uint32_t timestamp_ms, const Packet & pkt)
+{
+  auto frame_no = pkt.frame_no();
+
+  // an outdated packet is received, skip
+  if (frame_no <= already_decoded_no_) {
+    return;
+  }
+
+  // received packets in an exising frame
+  if (frames_.count(frame_no)) {
+    frames_.at(frame_no).add_packet(pkt);
+  }
+  else { // received packets in a new frame
+    frames_.insert(std::make_pair<uint32_t, FragmentedFrame>(pkt.frame_no(), {0, pkt}));
+  }
+
+  // check if a key frame is decodable
+  for (auto & frame : frames_) {
+    if (frame.second.is_key_frame() and frame.second.complete()) {
+      on_frame_complete(timestamp_ms, frame.second);
+    }
+  }
+
+  // check if the next frame is decodable
+  auto expected_frame_no = already_decoded_no_ + 1;
+  while (frames_.count(expected_frame_no) and frames_.at(expected_frame_no).complete()) {
+    auto & frame = frames_.at(expected_frame_no);
+    on_frame_complete(timestamp_ms, frame);
+    expected_frame_no = already_decoded_no_ + 1;
+  }
+}
