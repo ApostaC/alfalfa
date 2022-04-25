@@ -27,5 +27,6 @@ Optional<FragmentedFrame> BasicEncoder::encode_next_frame(uint32_t curr_timestam
   std::vector<uint8_t> data;
   data.resize(real_bytes);
   // note: time_to_next_frame is in MICRO-SECONDS (us)
-  return FragmentedFrame(0, 0, 0, frame_id_, 1000000 / fps_, data);
+  bool is_key_frame = (frame_id_ % gop_ == 1);
+  return FragmentedFrame(0, 0, 0, frame_id_, 1000000 / fps_, data, is_key_frame);
 }

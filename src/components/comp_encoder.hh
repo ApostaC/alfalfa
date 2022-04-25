@@ -20,9 +20,15 @@ private:
   uint32_t target_bitrate_byteps_ {0};
   uint16_t fps_ {0};
   uint32_t frame_id_ {0};
+  uint32_t gop_ {DEFAULT_GOP};
+
+  constexpr static int DEFAULT_GOP = 250; 
 
 public:
   BasicEncoder(uint32_t init_bitrate, uint16_t fps);
+
+  void set_gop(uint32_t gop) { gop_ = gop; }
+  uint32_t gop() { return gop_; }
 
   virtual void set_target_bitrate(uint32_t bitrate_byteps) override {target_bitrate_byteps_ = bitrate_byteps;}
   virtual Optional<FragmentedFrame> encode_next_frame(uint32_t curr_timestamp_ms) override;
