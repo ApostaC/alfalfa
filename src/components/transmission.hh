@@ -8,6 +8,58 @@
 #include "comp_encoder.hh"
 #include "comp_decoder.hh"
 
+class RTXInterface
+{
+public:
+  virtual void on_packet_sent(uint32_t timestamp_ms, const Packet & pkt) = 0;
+  virtual void on_ack_received(uint32_t timestamp_ms, const AckPacket & ack, std::deque<Packet> & target_buf) = 0;
+  virtual void on_rtx_sent(uint32_t timestamp_ms, const Packet & pkt) = 0;
+  virtual uint32_t get_rtx_bitrate_byteps(uint32_t timestamp_ms) = 0;
+
+  virtual ~RTXInterface() = default;
+};
+
+class NoRTX : public RTXInterface
+{
+  virtual void on_packet_sent(uint32_t, const Packet & ) override {}
+  virtual void on_ack_received(uint32_t, const AckPacket &, std::deque<Packet> &) override {};
+  virtual void on_rtx_sent(uint32_t, const Packet &) override {}
+  virtual uint32_t get_rtx_bitrate_byteps(uint32_t) override { return 0; }
+};
+
+class RTXManager : public RTXInterface
+{
+private:
+  using SeqNum = std::pair<uint32_t, uint16_t>; // frame_no, frag_no
+  struct UnackedInfo 
+  {
+    Packet packet {};
+    uint32_t num_rtx = 0;
+    uint32_t last_sent_ms = 0;
+  };
+
+  std::map<SeqNum, UnackedInfo> unacked_ {};    // unack queue
+  std::map<SeqNum, uint32_t> num_rtx_ {};       // number of retransmissions per unacked packet
+  std::map<SeqNum, uint32_t> last_sent_ms_ {};  // time of RTX pkt sent out
+
+  Optional<uint32_t> ewma_rtt_ms_ {};           // rtt estimation
+  constexpr static double ALPHA = 0.2;
+
+  std::map<uint32_t, uint32_t> sent_rtx_size_ {}; // RTX rate estimation: <timestamp_ms, size_in_bytes>
+  constexpr static uint32_t RTX_RATE_WINDOW_MS = 500;
+
+private:
+  void add_unacked(const Packet & pkt);
+  void add_rtt_sample(uint32_t rtt_ms);
+
+public:
+  RTXManager();
+  virtual void on_packet_sent(uint32_t timestamp_ms, const Packet & pkt) override;
+  virtual void on_ack_received(uint32_t timestamp_ms, const AckPacket & ack, std::deque<Packet> & tgt_buf) override;
+  virtual void on_rtx_sent(uint32_t timestamp_ms, const Packet & pkt) override;
+  virtual uint32_t get_rtx_bitrate_byteps(uint32_t timestamp_ms) override; 
+};
+
 /**
  * The pacer with different prioirty queues
  */
@@ -60,6 +112,7 @@ private:
   BudgetPacer pacer_ {};
   CongestionControlInterface & cc_;
   EncoderInterface & encoder_;
+  RTXInterface & rtx_mgr_;
 
   std::deque<Packet> data_queue_{};
   std::deque<Packet> rtx_queue_{};
@@ -70,7 +123,8 @@ private:
 public:
   TransSender(const Address & peer_addr, uint32_t fps, 
               CongestionControlInterface & cc, 
-              EncoderInterface & encoder);
+              EncoderInterface & encoder,
+              RTXInterface & rtx_mgr);
 
   // start the main loop
   void start();
