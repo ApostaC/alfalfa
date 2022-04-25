@@ -76,6 +76,10 @@ public:
   uint32_t send_timestamp_ms() const { return send_timestamp_ms_; }
   const std::string & payload() const { return payload_; }
 
+  /* for non-salsify encoders, reuse source_state and target_state as key-frame identifier */
+  void set_key_frame() { source_state_ = 0u; target_state_ = ~0u; }
+  bool is_key_frame() const { return (source_state_ == 0u) and (target_state_ == ~0u); }
+
   /* construct outgoing Packet */
   Packet( const std::vector<uint8_t> & whole_frame,
           const uint16_t connection_id,
@@ -112,6 +116,7 @@ private:
 
   uint32_t remaining_fragments_;
 
+  bool is_key_frame_;
 public:
   /* construct outgoing FragmentedFrame */
   FragmentedFrame( const uint16_t connection_id,
@@ -119,7 +124,8 @@ public:
                    const uint32_t target_state,
                    const uint32_t frame_no,
                    const uint32_t time_to_next_frame,
-                   const std::vector<uint8_t> & whole_frame );
+                   const std::vector<uint8_t> & whole_frame,
+                   bool is_key_frame = false);
 
   /* construct incoming FragmentedFrame from a Packet */
   FragmentedFrame( const uint16_t connection_id,
@@ -144,6 +150,8 @@ public:
   std::string frame() const;
   std::string partial_frame() const;
   const std::vector<Packet> & packets() const;
+  bool is_key_frame() const { return is_key_frame_; }
+
 
   /* delete copy-constructor and copy-assign operator */
   FragmentedFrame( const FragmentedFrame & other ) = delete;

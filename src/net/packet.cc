@@ -151,14 +151,16 @@ FragmentedFrame::FragmentedFrame( const uint16_t connection_id,
                                   const uint32_t target_state,
                                   const uint32_t frame_no,
                                   const uint32_t time_since_last,
-                                  const vector<uint8_t> & whole_frame )
+                                  const vector<uint8_t> & whole_frame,
+                                  bool is_key_frame )
   : connection_id_( connection_id ),
     source_state_( source_state ),
     target_state_( target_state ),
     frame_no_( frame_no ),
     fragments_in_this_frame_(),
     fragments_(),
-    remaining_fragments_( 0 )
+    remaining_fragments_( 0 ),
+    is_key_frame_ ( is_key_frame )
 {
   size_t next_fragment_start = 0;
 
@@ -175,6 +177,10 @@ FragmentedFrame::FragmentedFrame( const uint16_t connection_id,
 
   for ( Packet & packet : fragments_ ) {
     packet.set_fragments_in_this_frame( fragments_in_this_frame_ );
+
+    if (is_key_frame_) {
+      packet.set_key_frame();
+    }
   }
 }
 
@@ -187,7 +193,8 @@ FragmentedFrame::FragmentedFrame( const uint16_t connection_id,
     frame_no_( packet.frame_no() ),
     fragments_in_this_frame_( packet.fragments_in_this_frame() ),
     fragments_( packet.fragments_in_this_frame() ),
-    remaining_fragments_( packet.fragments_in_this_frame() )
+    remaining_fragments_( packet.fragments_in_this_frame() ),
+    is_key_frame_ ( packet.is_key_frame() )
 {
   sanity_check( packet );
 
