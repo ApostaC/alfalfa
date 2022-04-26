@@ -27,7 +27,8 @@
    OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. */
 
 #include <getopt.h>
-
+#include <unistd.h>
+#include <signal.h>
 #include <cstdlib>
 #include <random>
 #include <unordered_map>
@@ -51,6 +52,8 @@
 #include "paranoid.hh"
 #include "procinfo.hh"
 #include "sdl.hh"
+#include "timestamp.hh"
+#include "frame_observer.hh"
 
 using namespace std;
 using namespace std::chrono;
@@ -99,9 +102,54 @@ uint16_t ezrand()
   return ud( rd );
 }
 
-queue<RasterHandle> display_queue;
+struct DisplayInfo
+{
+  RasterHandle handle;
+  uint32_t frame_id;
+};
+
+queue<DisplayInfo> display_queue;
 mutex mtx;
 condition_variable cond;
+
+shared_ptr<CompleteFrameObserver> decoded_obs;
+string output_csv = "temp/decoder.csv";
+
+void dump_output_time()
+{
+  ofstream fout(output_csv, ios::out);
+  if (not fout or not decoded_obs) {
+    cerr << "Error in dump_output_time" << endl; 
+  }
+
+  decoded_obs->to_csv(fout);
+  fout.close();
+}
+
+void sigint_handler(int signum) 
+{
+  cerr << "Catch SIGINT!" << endl;
+  dump_output_time();
+  exit(signum);
+}
+
+void save_yuv_to_png(const BaseRaster & raster, uint32_t frame_id)
+{
+  auto h = raster.height(), w = raster.width();
+  size_t ysize = h * w;
+  size_t uvsize = h * w / 4;
+  cerr << h << " " << w << " " << ysize << " " << uvsize << endl;
+  cv::Mat yuv(h * 3 / 2, w, CV_8U);
+  memcpy(yuv.data, &raster.Y().at(0, 0), ysize);
+  memcpy(yuv.data + ysize, &raster.U().at(0, 0), uvsize);
+  memcpy(yuv.data + ysize + uvsize, &raster.V().at(0, 0), uvsize);
+
+  cv::Mat img;
+  cv::cvtColor(yuv, img, cv::COLOR_YUV2BGR_I420);
+  cv::imwrite("temp/test-" + to_string(frame_id) + ".png", img);
+
+  cerr << "Finished writting frame " << frame_id << endl;
+}
 
 void display_task( const VP8Raster & example_raster, bool fullscreen )
 {
@@ -111,19 +159,25 @@ void display_task( const VP8Raster & example_raster, bool fullscreen )
   (void)(fullscreen);
   (void)(example_raster);
   //while( not display.signal_quit() ) {
-  //  unique_lock<mutex> lock( mtx );
-  //  cond.wait( lock, []() { return not display_queue.empty(); } );
+  while(true) {
+    unique_lock<mutex> lock( mtx );
+    cond.wait( lock, []() { return not display_queue.empty(); } );
 
-  //  while( not display_queue.empty() ) {
-  //    //display.draw( display_queue.front() );
-  //    display.show_frame(display_queue.front().get());
-  //    display_queue.pop();
-  //  }
-  //}
-  //exit(EXIT_SUCCESS);
+    while( not display_queue.empty() ) {
+      //display.draw( display_queue.front() );
+      //display.show_frame(display_queue.front().handle.get());
+
+      // save first 250 frames
+      if (display_queue.front().frame_id <= 250) {
+        save_yuv_to_png(display_queue.front().handle.get(), display_queue.front().frame_id);
+      }
+      display_queue.pop();
+    }
+  }
+  exit(EXIT_SUCCESS);
 }
 
-void enqueue_frame( FramePlayer & player, const Chunk & frame )
+void enqueue_frame( FramePlayer & player, const Chunk & frame, uint32_t frame_num )
 {
   if ( frame.size() == 0 ) {
     return;
@@ -132,11 +186,11 @@ void enqueue_frame( FramePlayer & player, const Chunk & frame )
   const Optional<RasterHandle> raster = player.decode( frame );
 
   async( launch::async,
-    [&raster]()
+    [&raster, &frame_num]()
     {
       if ( raster.initialized() ) {
         lock_guard<mutex> lock( mtx );
-        display_queue.push( raster.get() );
+        display_queue.push( {raster.get(), frame_num} );
         cond.notify_all();
 
       }
@@ -144,35 +198,11 @@ void enqueue_frame( FramePlayer & player, const Chunk & frame )
   );
 }
 
-void save_frame_to_png(FramePlayer & player, const Chunk & frame, uint32_t frame_id)
-{
-  if ( frame.size() == 0 ) {
-    return;
-  }
-
-  const Optional<RasterHandle> raster = player.decode( frame );
-  if(not raster.initialized()) return;
-
-  auto & data = raster.get().get();
-
-  auto h = data.height(), w = data.width();
-  size_t ysize = h * w;
-  size_t uvsize = h * w / 4;
-  cerr << h << " " << w << " " << ysize << " " << uvsize << endl;
-  cv::Mat yuv(h * 3 / 2, w, CV_8U);
-  memcpy(yuv.data, &data.Y().at(0, 0), ysize);
-  memcpy(yuv.data + ysize, &data.U().at(0, 0), uvsize);
-  memcpy(yuv.data + ysize + uvsize, &data.V().at(0, 0), uvsize);
-
-  cv::Mat img;
-  cv::cvtColor(yuv, img, cv::COLOR_YUV2BGR_I420);
-  cv::imwrite("temp/test-" + to_string(frame_id) + ".png", img);
-
-  cerr << "Finished writting frame " << frame_id << endl;
-}
 
 int main( int argc, char *argv[] )
 {
+  signal(SIGINT, sigint_handler);
+
   /* check the command-line arguments */
   if ( argc < 1 ) { /* for sticklers */
     abort();
@@ -235,6 +265,9 @@ int main( int argc, char *argv[] )
   unordered_map<size_t, FragmentedFrame> fragmented_frames;
   size_t next_frame_no = 0;
 
+  /* frame observer */
+  decoded_obs = make_shared<CompleteFrameObserver>();
+
   /* EWMA */
   AverageInterPacketDelay avg_delay;
 
@@ -271,8 +304,9 @@ int main( int argc, char *argv[] )
         for ( size_t i = next_frame_no; i < packet.frame_no(); i++ ) {
           if ( fragmented_frames.count( i ) == 0 ) continue;
 
-          enqueue_frame( player, fragmented_frames.at( i ).partial_frame() );
-          save_frame_to_png(player, fragmented_frames.at(i).partial_frame(), fragmented_frames.at(i).frame_no());
+          decoded_obs->new_complete_frame(timestamp_ms(), fragmented_frames.at(i));
+          enqueue_frame( player, fragmented_frames.at( i ).partial_frame(), fragmented_frames.at(i).frame_no() );
+          //save_frame_to_png(player, fragmented_frames.at(i).partial_frame(), fragmented_frames.at(i).frame_no());
           fragmented_frames.erase( i );
         }
 
@@ -331,8 +365,9 @@ int main( int argc, char *argv[] )
         }
 
         // here we apply the frame
-        enqueue_frame( player, fragment.frame() );
-        save_frame_to_png(player, fragment.frame(), fragment.frame_no());
+        decoded_obs->new_complete_frame(timestamp_ms(), fragment);
+        enqueue_frame( player, fragment.frame(), fragment.frame_no() );
+        //save_frame_to_png(player, fragment.frame(), fragment.frame_no());
 
         // state "after" applying the frame
         current_state = player.current_decoder().minihash();
@@ -377,5 +412,6 @@ int main( int argc, char *argv[] )
     }
   }
 
+  dump_output_time();
   return EXIT_SUCCESS;
 }

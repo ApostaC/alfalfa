@@ -29,6 +29,8 @@
 #include <getopt.h>
 
 #include <cstdlib>
+#include <unistd.h>
+#include <signal.h>
 #include <iostream>
 #include <chrono>
 #include <vector>
@@ -53,6 +55,8 @@
 #include "camera.hh"
 #include "pacer.hh"
 #include "procinfo.hh"
+#include "timestamp.hh"
+#include "frame_observer.hh"
 
 using namespace std;
 using namespace std::chrono;
@@ -125,6 +129,29 @@ struct EncodeOutput
   {}
 };
 
+namespace {
+  shared_ptr<CompleteFrameObserver> encode_time_recorder {};
+  string output_csv {"temp/encoder.csv"};
+} // anonymous namespace for global variables
+
+void dump_output_time()
+{
+  ofstream fout(output_csv, ios::out);
+  if (not fout or not encode_time_recorder) {
+    cerr << "Error in dump_output_time" << endl; 
+  }
+
+  encode_time_recorder->to_csv(fout);
+  fout.close();
+}
+
+void sigint_handler(int signum) 
+{
+  cerr << "Catch SIGINT!" << endl;
+  dump_output_time();
+  exit(signum);
+}
+
 EncodeOutput do_encode_job( EncodeJob && encode_job )
 {
   vector<uint8_t> output;
@@ -193,6 +220,7 @@ enum class OperationMode
 
 int main( int argc, char *argv[] )
 {
+  signal(SIGINT, sigint_handler);
   /* check the command-line arguments */
   if ( argc < 1 ) { /* for sticklers */
     abort();
@@ -260,6 +288,8 @@ int main( int argc, char *argv[] )
     return EXIT_FAILURE;
   }
 
+  encode_time_recorder = make_shared<CompleteFrameObserver>();
+
   /* construct Socket for outgoing datagrams */
   UDPSocket socket;
   socket.connect( Address( argv[ optind ], argv[ optind + 1 ] ) );
@@ -293,7 +323,7 @@ int main( int argc, char *argv[] )
     throw runtime_error("Must specify a input y4m file");
   } 
   YUV4MPEGReader reader {input_file};
-  reader.set_fps(20);
+  reader.set_fps(25);
 
   /* construct the encoder */
   Encoder base_encoder { reader.display_width(), reader.display_height(),
@@ -632,6 +662,7 @@ int main( int argc, char *argv[] )
 
       last_sent = system_clock::now();
 
+      encode_time_recorder->new_complete_frame(timestamp_ms(), ff);
       /* cerr << "["
            << duration_cast<milliseconds>( last_sent.time_since_epoch() ).count()
            << "] "
@@ -725,5 +756,6 @@ int main( int argc, char *argv[] )
     }
   }
 
+  dump_output_time();
   return EXIT_FAILURE;
 }
