@@ -38,6 +38,9 @@
 #include <thread>
 #include <condition_variable>
 #include <future>
+#include <opencv2/core/core.hpp>
+#include <opencv2/highgui/highgui.hpp>
+#include <opencv2/imgproc.hpp>
 
 #include "socket.hh"
 #include "packet.hh"
@@ -98,25 +101,26 @@ uint16_t ezrand()
 
 queue<RasterHandle> display_queue;
 mutex mtx;
-condition_variable cv;
+condition_variable cond;
 
 void display_task( const VP8Raster & example_raster, bool fullscreen )
 {
   //VideoDisplay display { example_raster, fullscreen };
-  SDLDisplay display {example_raster.display_width(), example_raster.display_height()};
+  //SDLDisplay display {example_raster.display_width(), example_raster.display_height()};
 
   (void)(fullscreen);
-  while( not display.signal_quit() ) {
-    unique_lock<mutex> lock( mtx );
-    cv.wait( lock, []() { return not display_queue.empty(); } );
+  (void)(example_raster);
+  //while( not display.signal_quit() ) {
+  //  unique_lock<mutex> lock( mtx );
+  //  cond.wait( lock, []() { return not display_queue.empty(); } );
 
-    while( not display_queue.empty() ) {
-      //display.draw( display_queue.front() );
-      display.show_frame(display_queue.front().get());
-      display_queue.pop();
-    }
-  }
-  exit(EXIT_SUCCESS);
+  //  while( not display_queue.empty() ) {
+  //    //display.draw( display_queue.front() );
+  //    display.show_frame(display_queue.front().get());
+  //    display_queue.pop();
+  //  }
+  //}
+  //exit(EXIT_SUCCESS);
 }
 
 void enqueue_frame( FramePlayer & player, const Chunk & frame )
@@ -133,10 +137,38 @@ void enqueue_frame( FramePlayer & player, const Chunk & frame )
       if ( raster.initialized() ) {
         lock_guard<mutex> lock( mtx );
         display_queue.push( raster.get() );
-        cv.notify_all();
+        cond.notify_all();
+
       }
     }
   );
+}
+
+void save_frame_to_png(FramePlayer & player, const Chunk & frame, uint32_t frame_id)
+{
+  if ( frame.size() == 0 ) {
+    return;
+  }
+
+  const Optional<RasterHandle> raster = player.decode( frame );
+  if(not raster.initialized()) return;
+
+  auto & data = raster.get().get();
+
+  auto h = data.height(), w = data.width();
+  size_t ysize = h * w;
+  size_t uvsize = h * w / 4;
+  cerr << h << " " << w << " " << ysize << " " << uvsize << endl;
+  cv::Mat yuv(h * 3 / 2, w, CV_8U);
+  memcpy(yuv.data, &data.Y().at(0, 0), ysize);
+  memcpy(yuv.data + ysize, &data.U().at(0, 0), uvsize);
+  memcpy(yuv.data + ysize + uvsize, &data.V().at(0, 0), uvsize);
+
+  cv::Mat img;
+  cv::cvtColor(yuv, img, cv::COLOR_YUV2BGR_I420);
+  cv::imwrite("temp/test-" + to_string(frame_id) + ".png", img);
+
+  cerr << "Finished writting frame " << frame_id << endl;
 }
 
 int main( int argc, char *argv[] )
@@ -240,6 +272,7 @@ int main( int argc, char *argv[] )
           if ( fragmented_frames.count( i ) == 0 ) continue;
 
           enqueue_frame( player, fragmented_frames.at( i ).partial_frame() );
+          save_frame_to_png(player, fragmented_frames.at(i).partial_frame(), fragmented_frames.at(i).frame_no());
           fragmented_frames.erase( i );
         }
 
@@ -299,6 +332,7 @@ int main( int argc, char *argv[] )
 
         // here we apply the frame
         enqueue_frame( player, fragment.frame() );
+        save_frame_to_png(player, fragment.frame(), fragment.frame_no());
 
         // state "after" applying the frame
         current_state = player.current_decoder().minihash();

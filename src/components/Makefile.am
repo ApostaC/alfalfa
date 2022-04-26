@@ -3,7 +3,7 @@ AM_CXXFLAGS = $(PICKY_CXXFLAGS) $(NODEBUG_CXXFLAGS)
 
 AM_LDFLAGS = $(STATIC_BUILD_FLAG)
 #BASE_LDADD = ../input/libalfalfainput.a ../decoder/libalfalfadecoder.a ../util/libalfalfautil.a $(X264_LIBS) $(JPEG_LIBS) $(SDL_LIBS)
-LDADD = ../components/libalfalfacomp.a ../net/libnet.a ../decoder/libalfalfadecoder.a ../encoder/libalfalfaencoder.a ../util/libalfalfautil.a $(X264_LIBS) 
+LDADD = libalfalfacomp.a ../net/libnet.a ../decoder/libalfalfadecoder.a ../encoder/libalfalfaencoder.a ../util/libalfalfautil.a $(X264_LIBS) 
 
 noinst_LIBRARIES = libalfalfacomp.a
 
