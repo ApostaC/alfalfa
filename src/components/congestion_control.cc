@@ -9,7 +9,9 @@ void CCStatsRecorder::trigger_log(uint32_t timestamp_ms)
     last_log_ms_ = timestamp_ms;
     cerr << "[" << timestamp_ms << "] During last " << log_period_ << " ms" << endl
          << "   Sent " << pkt_counter_ << " packets " << size_counter_ << " bytes " << endl
-         << "   Received " << ack_counter_ << " acks, avg delay = " << moving_delay_ << " ms" << endl;
+         << "   Received " << ack_counter_ << " acks, avg delay = " << moving_delay_ << " ms" << endl
+         << "   Pacing rate = " << sending_rate_ / 125. << "kbps" << endl
+         << "   target bitrate = " << target_bitrate_ / 125. << "kbps" << endl;
     pkt_counter_ = 0;
     ack_counter_ = 0;
     size_counter_ = 0;
@@ -80,6 +82,8 @@ void DumbCongestionControl::on_ack_received(uint32_t timestamp_ms, const AckPack
 SalsifyCongestionControl::SalsifyCongestionControl(uint32_t D_ms, uint16_t fps)
   : d_ms_(D_ms), fps_(fps)
 {
+  stats_ = std::make_shared<CCStatsRecorder>();
+  add_observer(stats_);
 }
 
 void SalsifyCongestionControl::update_grace_period(uint32_t frame_id, uint32_t value_ms)
@@ -114,11 +118,12 @@ void SalsifyCongestionControl::update_estimation(uint32_t recv_timestamp_ms, uin
 
 void SalsifyCongestionControl::post_updates()
 {
-  assert(tao_ms_ >= 0);
+  if (not (tao_ms_ >= 0)) return;
   auto i32_tao_ms = max(1, static_cast<int>(tao_ms_)); // at least 1
   int num = d_ms_ / i32_tao_ms - ni_;
   num = max(num, 0); 
   
+  //cerr << "curr max pkts = " << num << endl;
   uint32_t exp_frame_size = num * MTU;
   uint32_t bitrate_byteps = exp_frame_size * fps_;
   uint32_t pacing_byteps = bitrate_byteps * 5;
@@ -133,7 +138,7 @@ void SalsifyCongestionControl::post_updates()
 
 void SalsifyCongestionControl::on_packet_sent(uint32_t timestamp_ms, const Packet &p) 
 {
-  stats_.on_packet_sent(timestamp_ms, p);
+  stats_->on_packet_sent(timestamp_ms, p);
   if (last_sent_ms_ <= 0) {
     // initialize the states
     last_sent_ms_ = timestamp_ms;
@@ -154,11 +159,12 @@ void SalsifyCongestionControl::on_packet_sent(uint32_t timestamp_ms, const Packe
     last_sent_ms_ = timestamp_ms;
     ni_++;
   }
+  post_updates();
 }
 
 void SalsifyCongestionControl::on_ack_received(uint32_t timestamp_ms, const AckPacket &p)
 {
-  stats_.on_ack_received(timestamp_ms, p);
+  stats_->on_ack_received(timestamp_ms, p);
   (void)timestamp_ms;
   auto recv_ms = p.arrive_time_ms();
   auto grace_period_ms = query_grace_period(p.frame_no());

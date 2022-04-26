@@ -43,7 +43,7 @@ void RTXManager::on_ack_received(uint32_t timestamp_ms, const AckPacket & ack, d
 {
   // update rtt
   int rtt = timestamp_ms - ack.send_time_ms();
-  assert(rtt > 0);
+  assert(rtt >= 0);
   add_rtt_sample(rtt);
 
   // find the unacked packet, return if nothing found
@@ -114,6 +114,15 @@ bool BudgetPacer::ready_to_send(uint32_t now_ms)
   return budget_ >= 0;
 }
 
+void BudgetPacer::set_pacing_rate(uint32_t rate_byteps)
+{ 
+  pacing_rate_byteps_ = rate_byteps; 
+  max_budget_ = (int)pacing_rate_byteps_ / 1000;
+  if (max_budget_ < DEFAULT_MAX_BUDGET) {
+    max_budget_ = DEFAULT_MAX_BUDGET;
+  }
+}
+
 void BudgetPacer::on_packet_sent(uint32_t timestamp_ms, size_t pkt_size)
 {
   budget_ -= pkt_size;
@@ -156,6 +165,10 @@ TransSender::TransSender(const Address & peer_addr, uint32_t fps,
                                      make_move_iterator(packets.end()));
             packets.clear();
           }
+
+          this->pacer_.set_pacing_rate(this->cached_pacing_rate_);
+          cerr << "[" << now_ms << "] Queue length is " << data_queue_.size() 
+               << " cached pacing rate is " << this->cached_pacing_rate_ << endl;
           return ResultType::Continue;
         }));
 
@@ -164,33 +177,11 @@ TransSender::TransSender(const Address & peer_addr, uint32_t fps,
         [this]() -> Result
         {
           auto now_ms = timestamp_ms();
-          // check RTX queue
-          if (not this->rtx_queue_.empty()) {
-            auto & packet = this->rtx_queue_.front();
-            packet.set_send_timestamp_ms(now_ms);
-            auto str = packet.to_string();
-            this->pacer_.on_packet_sent(now_ms, str.length());
-            this->socket_.send(str);
-            this->cc_.on_packet_sent(now_ms, packet);
-            this->rtx_mgr_.on_rtx_sent(now_ms, packet);
-            this->rtx_queue_.pop_front();
-            return ResultType::Continue;
+          while(this->pacer_.ready_to_send(now_ms) and this->has_data_to_send()) {
+            this->send_one_packet(now_ms);
+            now_ms = timestamp_ms();
           }
 
-          // check data queue
-          if (not this->data_queue_.empty()) {
-            auto & packet = this->data_queue_.front();
-            packet.set_send_timestamp_ms(now_ms);
-            auto str = packet.to_string();
-            this->pacer_.on_packet_sent(now_ms, str.length());
-            this->socket_.send(str);
-            this->cc_.on_packet_sent(now_ms, packet);
-            this->rtx_mgr_.on_packet_sent(now_ms, packet);
-            this->data_queue_.pop_front();
-            return ResultType::Continue;
-          }
-
-          // TODO: shall we do padding here? by something like generate_pad_packet()
           return ResultType::Continue;
         }, 
         [this]() {return this->pacer_.ready_to_send(timestamp_ms()) and this->has_data_to_send();}));
@@ -211,9 +202,40 @@ TransSender::TransSender(const Address & peer_addr, uint32_t fps,
         }));
 }
 
-void TransSender::start() 
+void TransSender::send_one_packet(uint32_t now_ms)
 {
-  pacer_.start_pacer(timestamp_ms());
+  // check RTX queue
+  if (not this->rtx_queue_.empty()) {
+    auto & packet = this->rtx_queue_.front();
+    packet.set_send_timestamp_ms(now_ms);
+    auto str = packet.to_string();
+    this->pacer_.on_packet_sent(now_ms, str.length());
+    this->socket_.send(str);
+    this->cc_.on_packet_sent(now_ms, packet);
+    this->rtx_mgr_.on_rtx_sent(now_ms, packet);
+    this->rtx_queue_.pop_front();
+    return;
+  }
+
+  // check data queue
+  if (not this->data_queue_.empty()) {
+    auto & packet = this->data_queue_.front();
+    packet.set_send_timestamp_ms(now_ms);
+    auto str = packet.to_string();
+    this->pacer_.on_packet_sent(now_ms, str.length());
+    this->socket_.send(str);
+    this->cc_.on_packet_sent(now_ms, packet);
+    this->rtx_mgr_.on_packet_sent(now_ms, packet);
+    this->data_queue_.pop_front();
+    return;
+  }
+  // TODO: shall we do padding here? by something like generate_pad_packet()
+}
+
+void TransSender::start(uint32_t time_limit_ms) 
+{
+  uint32_t start_ms = timestamp_ms();
+  pacer_.start_pacer(start_ms);
   while (true) {
     uint32_t ttw = min(pacer_.ms_until_nextcheck(), 1u);
     const auto poll_result = poller_.poll(ttw);
@@ -223,12 +245,20 @@ void TransSender::start()
       }
       throw std::runtime_error("TransSender got a unhandled error in the main loop!");
     }
+
+    if(time_limit_ms > 0 and timestamp_ms() > start_ms + time_limit_ms) {
+      cerr << "Time limit reached! stop..." << endl;
+      break;
+    }
   }
 }
 
 void TransSender::post_updates(uint32_t sending_rate_byteps, uint32_t target_bitrate_byteps)
 {
-  pacer_.set_pacing_rate(sending_rate_byteps);
+  cached_pacing_rate_ = sending_rate_byteps;
+  //pacer_.set_pacing_rate(sending_rate_byteps);
+  // NOTE: if we use pacer.set_pacing_rate here, it will cause the real pacing rate 
+  //       of a frame does not match the expected pacing rate when encoding the frame
   
   auto now_ms = timestamp_ms();
   auto rtx_rate = rtx_mgr_.get_rtx_bitrate_byteps(now_ms);

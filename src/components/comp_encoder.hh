@@ -2,13 +2,21 @@
 #define COMP_ENCODER_HH
 
 #include "packet.hh"
+#include "frame_observer.hh"
 #include "optional.hh"
 
 class EncoderInterface 
 {
+protected:
+  std::vector<FrameObserverPtr> frame_observers_ {};
+
 public:
+  // main interface
   virtual void set_target_bitrate(uint32_t bitrate_byteps) = 0;
   virtual Optional<FragmentedFrame> encode_next_frame(uint32_t curr_timestamp_ms) = 0;
+
+  // adding observer
+  void add_frame_observer(FrameObserverPtr obs) { frame_observers_.push_back(obs); }
 
   virtual ~EncoderInterface() = default;
 };

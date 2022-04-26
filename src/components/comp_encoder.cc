@@ -14,7 +14,6 @@ BasicEncoder::BasicEncoder(uint32_t init_bitrate_byteps, uint16_t fps)
 Optional<FragmentedFrame> BasicEncoder::encode_next_frame(uint32_t curr_timestamp_ms)
 {
   frame_id_ += 1;
-  (void)(curr_timestamp_ms); // suppress unused
   std::random_device rd;
   std::ranlux24 e(rd());
   std::normal_distribution<double> dis(1, 1e-5);
@@ -26,7 +25,15 @@ Optional<FragmentedFrame> BasicEncoder::encode_next_frame(uint32_t curr_timestam
   }
   std::vector<uint8_t> data;
   data.resize(real_bytes);
+
+  //cerr << "Encoding a new frame: size = " << real_bytes << " tgt_br = " << target_bitrate_byteps_ << endl;
   // note: time_to_next_frame is in MICRO-SECONDS (us)
   bool is_key_frame = (frame_id_ % gop_ == 1);
-  return FragmentedFrame(0, 0, 0, frame_id_, 1000000 / fps_, data, is_key_frame);
+  FragmentedFrame ret(0, 0, 0, frame_id_, 1000000 / fps_, data, is_key_frame);
+
+  // update frame_observer
+  for (auto obs : frame_observers_) {
+    obs->new_complete_frame(curr_timestamp_ms, ret);
+  }
+  return ret;
 }

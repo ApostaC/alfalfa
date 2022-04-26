@@ -30,7 +30,7 @@ public:
   virtual ~CongestionControlInterface() = default;
 };
 
-class CCStatsRecorder 
+class CCStatsRecorder : public CongestionControlObserver
 {
 private:
   uint32_t last_log_ms_ {0};
@@ -39,11 +39,18 @@ private:
   uint32_t size_counter_{0};
   uint32_t ack_counter_{0};
   double moving_delay_{0};
+  uint32_t sending_rate_{0};
+  uint32_t target_bitrate_{0};
   void trigger_log(uint32_t timestamp_ms);
 public:
   CCStatsRecorder(uint32_t log_period_ms = 1000) : log_period_(log_period_ms) {}
   void on_packet_sent(uint32_t timestamp_ms, const Packet &p); 
   void on_ack_received(uint32_t timestamp_ms, const AckPacket &p);
+  virtual void post_updates(uint32_t sending_rate_byteps, uint32_t target_bitrate_byteps) 
+  {
+    sending_rate_ = sending_rate_byteps;
+    target_bitrate_ = target_bitrate_byteps;
+  }
 };
 
 class DumbCongestionControl : public CongestionControlInterface
@@ -81,7 +88,7 @@ private:
 
   uint16_t fps_ {0};
 
-  CCStatsRecorder stats_{};
+  std::shared_ptr<CCStatsRecorder> stats_{};
 private:
   void update_grace_period(uint32_t frame_id, uint32_t value_ms);
   uint32_t query_grace_period(uint32_t frame_id);

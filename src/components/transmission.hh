@@ -66,10 +66,13 @@ public:
 class BudgetPacer
 {
 private:
+  constexpr static int DEFAULT_MAX_BUDGET = 500;
+
+private:
   uint32_t last_update_timestamp_ms_ {0};
   uint32_t pacing_rate_byteps_ {0};
   int budget_ {0};
-  int max_budget_ {0};
+  int max_budget_ {DEFAULT_MAX_BUDGET};
 
 private:
   void update_budget(uint32_t timestamp_ms);
@@ -81,7 +84,7 @@ public:
   void start_pacer(uint32_t timestamp_ms) { last_update_timestamp_ms_ = timestamp_ms; }
 
   // set pacing rate
-  void set_pacing_rate(uint32_t rate_byteps) { pacing_rate_byteps_ = rate_byteps; }
+  void set_pacing_rate(uint32_t rate_byteps);
 
   // called when sending out a packet 
   void on_packet_sent(uint32_t timestamp_ms, size_t pkt_size);
@@ -106,6 +109,9 @@ class TransSender
     : public CongestionControlObserver
 {
 private:
+  constexpr static uint32_t INITIAL_PACING_RATE = 100 * 125;
+
+private:
   Poller poller_ {};
   UDPSocket socket_{};
   Timerfd frame_timer_ {};
@@ -114,11 +120,14 @@ private:
   EncoderInterface & encoder_;
   RTXInterface & rtx_mgr_;
 
+  uint32_t cached_pacing_rate_ {INITIAL_PACING_RATE};
+
   std::deque<Packet> data_queue_{};
   std::deque<Packet> rtx_queue_{};
 
 private:
   bool has_data_to_send() const { return not (data_queue_.empty() and rtx_queue_.empty()); }
+  void send_one_packet(uint32_t now_ms);
 
 public:
   TransSender(const Address & peer_addr, uint32_t fps, 
@@ -127,7 +136,7 @@ public:
               RTXInterface & rtx_mgr);
 
   // start the main loop
-  void start();
+  void start(uint32_t time_limt_ms = -1);
 
   // implements CongestionControlObserver
   void post_updates(uint32_t sending_rate_byteps, uint32_t target_bitrate_byteps) override; 
