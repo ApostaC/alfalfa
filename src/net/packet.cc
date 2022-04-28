@@ -234,7 +234,6 @@ void FragmentedFrame::gen_fec_packets(const vector<uint8_t> & whole_frame)
   size_t next_fragment_start = effective_payload;
   for ( uint16_t fragment_no = original_pkts; next_fragment_start < fec_vec.size();
         fragment_no++ ) {
-    cerr << " next fragment start is " << next_fragment_start << endl;
     fragments_.emplace_back( fec_vec, connection_id_, source_state_, target_state_,
                              frame_no_, fragment_no, 0, next_fragment_start );
   }

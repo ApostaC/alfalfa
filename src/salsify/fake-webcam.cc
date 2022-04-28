@@ -29,6 +29,7 @@
 #include <iostream>
 #include <chrono>
 #include <thread>
+#include <stdio.h>
 
 #include "yuv4mpeg.hh"
 #include "paranoid.hh"
@@ -39,6 +40,13 @@ using namespace std;
 void usage( const char *argv0 )
 {
   cerr << "Usage: " << argv0 << " INPUT FPS" << endl;
+}
+
+void dump_raster_to_file(const BaseRaster & raster, const char * filename)
+{
+  FILE * fout = fopen(filename, "wb");
+  raster.dump(fout);
+  fclose(fout);
 }
 
 int main( int argc, char *argv[] )
@@ -56,6 +64,14 @@ int main( int argc, char *argv[] )
   /* open the YUV4MPEG input */
   YUV4MPEGReader input { argv[ 1 ] };
 
+  /* debug: dump raster to file */
+  for(int i=0;i<250;i++) {
+    string fname = "../../test/images/input-" + to_string(i) + ".dat";
+    auto raster = input.get_next_frame();
+    dump_raster_to_file(raster.get().get(), fname.c_str());
+  }
+  cerr << "Finished dumping yuv data" << endl;
+
   /* parse the # of frames per second of playback */
   unsigned int frames_per_second = paranoid::stoul( argv[ 2 ] );
 
@@ -66,7 +82,7 @@ int main( int argc, char *argv[] )
 
   auto next_frame_is_due = chrono::system_clock::now();
 
-  SDLDisplay display(854, 480);
+  SDLDisplay display(864, 480);
 
   bool initialized = false;
   while ( not display.signal_quit() ) {
@@ -79,6 +95,7 @@ int main( int argc, char *argv[] )
     if ( not raster.initialized() ) {
       break; /* eof */
     }
+
 
     /* send the file header if we haven't already */
     if ( not initialized ) {

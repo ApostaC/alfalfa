@@ -39,9 +39,9 @@
 #include <thread>
 #include <condition_variable>
 #include <future>
-#include <opencv2/core/core.hpp>
-#include <opencv2/highgui/highgui.hpp>
-#include <opencv2/imgproc.hpp>
+//#include <opencv2/core/core.hpp>
+//#include <opencv2/highgui/highgui.hpp>
+//#include <opencv2/imgproc.hpp>
 
 #include "socket.hh"
 #include "packet.hh"
@@ -117,6 +117,8 @@ string output_csv = "temp/decoder.csv";
 
 void dump_output_time()
 {
+  if (output_csv != "temp/decoder.csv") return;
+
   ofstream fout(output_csv, ios::out);
   if (not fout or not decoded_obs) {
     cerr << "Error in dump_output_time" << endl; 
@@ -138,16 +140,26 @@ void save_yuv_to_png(const BaseRaster & raster, uint32_t frame_id)
   auto h = raster.height(), w = raster.width();
   size_t ysize = h * w;
   size_t uvsize = h * w / 4;
+  (void)frame_id;
   cerr << h << " " << w << " " << ysize << " " << uvsize << endl;
-  cv::Mat yuv(h * 3 / 2, w, CV_8U);
-  memcpy(yuv.data, &raster.Y().at(0, 0), ysize);
-  memcpy(yuv.data + ysize, &raster.U().at(0, 0), uvsize);
-  memcpy(yuv.data + ysize + uvsize, &raster.V().at(0, 0), uvsize);
+  //cv::Mat yuv(h * 3 / 2, w, CV_8U);
+  //memcpy(yuv.data, &raster.Y().at(0, 0), ysize);
+  //memcpy(yuv.data + ysize, &raster.U().at(0, 0), uvsize);
+  //memcpy(yuv.data + ysize + uvsize, &raster.V().at(0, 0), uvsize);
 
-  cv::Mat img;
-  cv::cvtColor(yuv, img, cv::COLOR_YUV2BGR_I420);
-  cv::imwrite("temp/test-" + to_string(frame_id) + ".png", img);
+  //cv::Mat img;
+  //cv::cvtColor(yuv, img, cv::COLOR_YUV2BGR_I420);
+  //cv::imwrite("temp/test-" + to_string(frame_id) + ".png", img);
 
+  //cerr << "Finished writting frame " << frame_id << endl;
+}
+
+void dump_raster_to_file(const BaseRaster & raster, uint32_t frame_id)
+{
+  string fname = "temp/test-" + to_string(frame_id) + ".dat";
+  FILE * fout = fopen(fname.c_str(), "wb");
+  raster.dump(fout);
+  fclose(fout);
   cerr << "Finished writting frame " << frame_id << endl;
 }
 
@@ -169,7 +181,8 @@ void display_task( const VP8Raster & example_raster, bool fullscreen )
 
       // save first 250 frames
       if (display_queue.front().frame_id <= 250) {
-        save_yuv_to_png(display_queue.front().handle.get(), display_queue.front().frame_id);
+        //save_yuv_to_png(display_queue.front().handle.get(), display_queue.front().frame_id);
+        //dump_raster_to_file(display_queue.front().handle.get(), display_queue.front().frame_id);
       }
       display_queue.pop();
     }

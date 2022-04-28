@@ -653,6 +653,9 @@ int main( int argc, char *argv[] )
                            frame_no,
                            static_cast<uint32_t>( duration_cast<microseconds>( system_clock::now() - last_sent ).count() ),
                            output.frame };
+
+      encode_time_recorder->new_complete_frame(timestamp_ms(), ff);
+
       /* enqueue the packets to be sent */
       /* send 5x faster than packets are being received */
       const unsigned int inter_send_delay = min( 2000u, max( 500u, avg_delay / 5 ) );
@@ -662,7 +665,6 @@ int main( int argc, char *argv[] )
 
       last_sent = system_clock::now();
 
-      encode_time_recorder->new_complete_frame(timestamp_ms(), ff);
       /* cerr << "["
            << duration_cast<milliseconds>( last_sent.time_since_epoch() ).count()
            << "] "

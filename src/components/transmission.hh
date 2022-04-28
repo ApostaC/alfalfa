@@ -157,6 +157,6 @@ public:
   TransReceiver(const uint16_t port, DecoderInterface & decoder);
 
   // start the main loop
-  void start();
+  void start(uint32_t time_limit_ms = -1);
 };
 #endif

@@ -3,6 +3,7 @@
 
 #include <memory>
 #include <map>
+#include <set>
 #include <vector>
 #include "packet.hh"  
 
@@ -102,6 +103,201 @@ public:
 
   /* setter */
   void set_fps(uint16_t fps) { fps_ = fps; }
+};
+
+class GCCMinus : public CongestionControlInterface
+{
+public:
+  enum RateControlState {HOLD = 0, INCREASE=1, DECREASE=2};
+
+public:
+
+  /**
+   * calculate the receiving rate per UPDATE_INTERVAL_MS ms
+   * the rate is averaged among the latest WINDOW_MS ms
+   */
+  class RateEstimator
+  {
+    private:
+      constexpr static uint32_t WINDOW_MS = 300; // calculate avg recv rate in latest XXX ms
+      constexpr static uint32_t UPDATE_INTERVAL_MS = 50; // update every 50 ms
+      
+      using SeqNum = std::pair<uint32_t, uint16_t>; // frame_no, frag_no
+
+    private:
+      std::map<SeqNum, Packet> unacked_ {};
+      std::multimap<uint32_t, uint32_t> acked_bytes_ {};  // acked bytes in the last window
+
+      uint32_t estimate_rate_byteps_ {100 * 125}; // default 100kbps
+      uint32_t last_update_ms_ {0};
+    public:
+      void on_packet_sent(uint32_t timestamp_ms, const Packet & pkt);
+      void on_ack_received(uint32_t timestamp_ms, const AckPacket & pkt);
+
+      uint32_t get_rate_estimation() const { return estimate_rate_byteps_; }
+  };
+
+  /**
+   * calculate the delay related values: d_send, d_recv, d_size for each frame
+   */
+  class DelayEstimator
+  {
+    private:
+      struct FrameInfo 
+      {
+        bool send_completed {false};
+        bool recv_completed {false};
+        uint32_t t_last {0}, T_last {0};
+        uint32_t total_pkts = 0;
+        uint32_t total_bytes = 0;
+      };
+
+    public:
+      struct DelayResult
+      {
+        uint32_t d_send {0};
+        uint32_t d_recv {0};
+        uint32_t d_size {0};
+        bool valid {false};
+      };
+
+    private:
+      std::map<uint32_t, FrameInfo> frames_ {};
+      uint32_t curr_completed_frame_ {0};
+
+      DelayResult result_ {};
+  
+    private:
+      void new_complete_frame(uint32_t frame_no);
+    
+    public:
+      void on_packet_sent(uint32_t timestamp_ms, const Packet & pkt);
+      void on_ack_received(uint32_t timestamp_ms, const AckPacket & pkt);
+
+      const DelayResult & get_result() const { return result_; }
+  };
+
+  /**
+   * use d_send, d_recv and d_size to compute the m_i
+   */
+  class TrendlineFilter
+  {
+    private:
+      constexpr static double ALPHA = 0.2;
+      bool initialized_ { false };
+      double m_i_ {-1};
+    public:
+      void update(const DelayEstimator::DelayResult & delay_result);
+      double get_estimation() const; // get m_i
+  };
+
+  /**
+   * use m_i to compute gamma_i, and then derive the current state
+   */
+  class OveruseDetector
+  {
+    private:
+      enum Signal {NORMAL = 0, UNDERUSE = -1, OVERUSE = 1};
+      constexpr static double GAMMA = 1;
+    private:
+      RateControlState state_;
+    
+      void signal_state_change(Signal signal); 
+    public:
+      void update(double m_i);
+      RateControlState get_state() const {return state_;}
+  };
+
+  /**
+   * use state, incoming rate and loss rate together to determine the final rate
+   */
+  class AimdController
+  {
+    private: 
+      constexpr static double LOW_LOSS_THRESH = 0.02;
+      constexpr static double HIGH_LOSS_THRESH = 0.10;
+
+      constexpr static uint32_t TRIGGER_INTERVAL_MS = 500;
+
+      constexpr static uint32_t MIN_RATE_BYTEPS = 10 * 125; // 10 kbps
+    private:
+      uint32_t latest_rate_estimation_byteps_ {800 * 125}; // start from 100Kbps
+      uint32_t last_rate_update_ms_ {0};
+
+      double curr_loss_rate_ {0.};
+      RateControlState curr_state_ {HOLD};
+      uint32_t incoming_rate_byteps_ {0};
+
+    private:
+      void update_estimation(uint32_t now_ms); 
+
+    public:
+      // TODO: add heuristics in aimd_rate_control.cc in webrtc repo
+      // update loss 
+      void update_loss(uint32_t timestamp_ms, double loss_rate);
+
+      // update state 
+      void update_state(uint32_t timestamp_ms, RateControlState state);
+
+      // update incoming rate
+      void update_incoming_rate(uint32_t timestamp_ms, uint32_t incoming_rate_byteps);
+      
+      // get the final rate
+      uint32_t get_rate_estimation(uint32_t now_ms);
+  };
+
+  class LossCalculator
+  {
+    private:
+      constexpr static int LOSS_INTERVAL_MS = 1000;
+      using SeqNum = std::tuple<uint32_t, uint32_t, uint16_t>; // send_time_ms, frame_no, frag_no
+
+    private:
+      std::set<SeqNum> acked_ {};
+      std::set<SeqNum> unacked_ {}; // seqnum to timestamp
+      uint32_t latest_ack_timestamp_ms_ {0};
+
+    private:
+      SeqNum get_seq(const Packet & p) { return {p.send_timestamp_ms(), p.frame_no(), p.fragment_no()}; }
+      SeqNum get_seq(const AckPacket & p) { return {p.send_time_ms(), p.frame_no(), p.fragment_no()}; }
+
+    public:
+      void on_packet_sent(uint32_t timestamp_ms, const Packet &p);
+      void on_ack_received(uint32_t timestamp_ms, const AckPacket &p);
+
+      /**
+       * start calculate from the latest ack - LOSS_INTERVAL_MS to the latest ack
+       */
+      double get_loss_rate(); // real loss rate = return value / 65535.0f
+  };
+
+private:
+  constexpr static uint32_t UPDATE_INTERVAL_MS = 100;
+
+private:
+  RateEstimator rate_est_ {};
+  DelayEstimator delay_est_ {};
+  TrendlineFilter trendline_ {};
+  OveruseDetector overuse_ {};
+  AimdController aimd_ {};
+  LossCalculator loss_calc_ {};
+
+  std::shared_ptr<CCStatsRecorder> stats_{};
+
+  uint32_t last_update_ms_ {0};
+private:
+  void post_updates(uint32_t now_ms);
+
+  void internal_update(uint32_t now_ms);
+
+public:
+  GCCMinus();
+
+  // main interface
+  virtual void on_packet_sent(uint32_t timestamp_ms, const Packet &p) override;
+  virtual void on_ack_received(uint32_t timestamp_ms, const AckPacket &p) override;
+
+  ~GCCMinus() = default;
 };
 
 #endif

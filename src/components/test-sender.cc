@@ -49,7 +49,9 @@ int main(int argc, char *argv[])
 
   int fps = 25;
   BasicEncoder encoder(500 * 125, fps);
-  SalsifyCongestionControl cc(100, fps);
+  encoder.set_fec_rate(255u * 0.3);
+  //SalsifyCongestionControl cc(100, fps);
+  GCCMinus cc;
   RTXManager rtx_mgr;
 
   encode_time_recorder = std::make_shared<CompleteFrameObserver>();
@@ -59,7 +61,7 @@ int main(int argc, char *argv[])
   cc.add_observer(sender);
 
   cout << "Starting sender!" << endl;
-  uint32_t limit_ms = 20 * 1000;
+  uint32_t limit_ms = 12 * 1000;
   sender->start(limit_ms);
   dump_output_time();
   return 0;

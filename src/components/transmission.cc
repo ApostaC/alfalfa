@@ -292,12 +292,19 @@ TransReceiver::TransReceiver(const uint16_t port, DecoderInterface & decoder)
       }));
 }
 
-void TransReceiver::start()
+void TransReceiver::start(uint32_t time_limit_ms)
 {
+  uint32_t start_ms = timestamp_ms();
+  uint32_t timeout_ms = 100;
   while (true) {
-    const auto poll_result = poller_.poll( -1 );
+    const auto poll_result = poller_.poll( timeout_ms );
     if ( poll_result.result == Poller::Result::Type::Exit ) {
       return;
+    }
+
+    if (time_limit_ms != (~0u) and timestamp_ms() > start_ms + time_limit_ms) {
+      cerr << "Time limit reached! stop..." << endl;
+      break;
     }
   }
 }
