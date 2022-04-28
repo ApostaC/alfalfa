@@ -204,12 +204,48 @@ bool test_trans()
   cc.add_observer(sender);
 
   //sender->start();
-  std::thread receiver_thread([&](){receiver->start();});
-  std::thread sender_thread([&](){sender->start();});
+  std::thread receiver_thread([&](){receiver->start(3500);});
+  std::thread sender_thread([&](){sender->start(3001);});
 
   receiver_thread.join();
   sender_thread.join();
 
+  out_green(cerr) << "-------------- PASSED: trans ----------------"; out_normal(cerr) << endl;
+  return true;
+}
+
+bool test_fec()
+{
+  out_green(cerr) << "============== test: trans ================="; out_normal(cerr) << endl;
+  uint32_t fps = 25;
+  BasicEncoder encoder(2500 * 125, fps);
+  auto f1 = encoder.encode_next_frame(0);
+  cerr << "Frame without FEC: " << f1.get().packets().size() << "packets, " << f1.get().frame().size() << "bytes" << endl;
+  encoder.set_fec_rate(255 * 0.3);
+  auto f2 = encoder.encode_next_frame(1);
+  cerr << "Frame with 30 FEC: " << f2.get().packets().size() << "packets, " << f2.get().frame().size() << "bytes" << endl;
+  cerr << "Frame with 30 FEC: FEC pkts: " << f2.get().get_num_fec_fragments() << " packets, fec ratio: " << (int)f2.get().get_fec_rate() << endl;
+
+  // now, a small number of packets has arrived
+  NonBlockingDecoder decoder;
+  auto frame_obs = std::make_shared<FrameArrivalTimeObserver>();
+  decoder.add_frame_observer(frame_obs);
+
+  auto & pkts = f2.get().packets();
+  for (uint32_t i=0;i<pkts.size();i++) {
+    cerr << (int)pkts[i].fec_rate() << " " << (int)f2.get().get_fec_rate() << endl;
+    assert(pkts[i].fec_rate() == f2.get().get_fec_rate());
+    assert(pkts[i].red_frags_in_this_frame() == f2.get().get_num_fec_fragments());
+    decoder.incoming_packet(i+1, pkts[i]);
+  }
+  
+  auto & res = frame_obs->arrival_time();
+  decltype(res) exp_res {{2, f2.get().get_num_payload_fragments()}};
+  for(auto ent : res) {
+    cerr << "Result: " << ent.first << " " << ent.second << endl;
+    assert(exp_res.count(ent.first) > 0);
+    assert(exp_res.at(ent.first) == ent.second);
+  }
   out_green(cerr) << "-------------- PASSED: trans ----------------"; out_normal(cerr) << endl;
   return true;
 }
@@ -224,5 +260,6 @@ int main(int argc, char *argv[])
   test_basic_encoder_decoder();
   test_blocking_decoder();
   test_rtx_mgr();
+  test_fec();
   test_trans();
 }

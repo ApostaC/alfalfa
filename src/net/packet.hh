@@ -52,6 +52,9 @@ private:
   uint32_t time_since_last_; /* microseconds */
   uint32_t send_timestamp_ms_; /* milliseconds */
 
+  uint16_t fec_rate_; // 0 --> 0, 255 --> 100%
+  uint16_t red_fragments_in_this_frame_; // 0 --> 0, 255 --> 100%
+
   std::string payload_;
 
 public:
@@ -79,6 +82,12 @@ public:
   /* for non-salsify encoders, reuse source_state and target_state as key-frame identifier */
   void set_key_frame() { source_state_ = 0u; target_state_ = ~0u; }
   bool is_key_frame() const { return (source_state_ == 0u) and (target_state_ == ~0u); }
+
+  /* for fec */
+  void set_fec_rate(uint8_t fec_rate) { fec_rate_ = fec_rate; }
+  uint8_t fec_rate() const { return fec_rate_; }
+  void set_red_frags_in_this_frame(uint16_t red_frags) { red_fragments_in_this_frame_ = red_frags; }
+  uint16_t red_frags_in_this_frame() const { return red_fragments_in_this_frame_; }
 
   /* construct outgoing Packet */
   Packet( const std::vector<uint8_t> & whole_frame,
@@ -117,6 +126,14 @@ private:
   uint32_t remaining_fragments_;
 
   bool is_key_frame_;
+  
+  /* for FEC */
+  uint8_t fec_rate_ {0};
+  uint16_t num_fec_fragments_ {0};
+
+private:
+  void gen_fec_packets(const std::vector<uint8_t> & whole_frame);
+
 public:
   /* construct outgoing FragmentedFrame */
   FragmentedFrame( const uint16_t connection_id,
@@ -125,7 +142,8 @@ public:
                    const uint32_t frame_no,
                    const uint32_t time_to_next_frame,
                    const std::vector<uint8_t> & whole_frame,
-                   bool is_key_frame = false);
+                   const bool is_key_frame = false,
+                   const uint8_t fec_rate_ = 0);
 
   /* construct incoming FragmentedFrame from a Packet */
   FragmentedFrame( const uint16_t connection_id,
@@ -152,6 +170,10 @@ public:
   const std::vector<Packet> & packets() const;
   bool is_key_frame() const { return is_key_frame_; }
 
+  /* fec related */
+  uint8_t get_fec_rate() const { return fec_rate_; }
+  uint16_t get_num_fec_fragments() const { return num_fec_fragments_; }
+  uint16_t get_num_payload_fragments() const { return fragments_in_this_frame() - num_fec_fragments_; }
 
   /* delete copy-constructor and copy-assign operator */
   FragmentedFrame( const FragmentedFrame & other ) = delete;
@@ -166,7 +188,9 @@ public:
       fragments_in_this_frame_( other.fragments_in_this_frame_ ),
       fragments_( move( other.fragments_ ) ),
       remaining_fragments_( other.remaining_fragments_ ),
-      is_key_frame_( other.is_key_frame_ )
+      is_key_frame_( other.is_key_frame_ ),
+      fec_rate_( other.fec_rate_),
+      num_fec_fragments_( other.num_fec_fragments_ )
   {}
 };
 

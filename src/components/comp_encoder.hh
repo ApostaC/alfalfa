@@ -29,6 +29,7 @@ private:
   uint16_t fps_ {0};
   uint32_t frame_id_ {0};
   uint32_t gop_ {DEFAULT_GOP};
+  uint8_t fec_rate_ {0};
 
   constexpr static int DEFAULT_GOP = 250; 
 
@@ -40,6 +41,9 @@ public:
 
   virtual void set_target_bitrate(uint32_t bitrate_byteps) override {target_bitrate_byteps_ = bitrate_byteps;}
   virtual Optional<FragmentedFrame> encode_next_frame(uint32_t curr_timestamp_ms) override;
+
+  void set_fec_rate(uint8_t fec_rate) { fec_rate_ = fec_rate; }
+  uint8_t fec_rate() const { return fec_rate_; }
 };
 
 #endif

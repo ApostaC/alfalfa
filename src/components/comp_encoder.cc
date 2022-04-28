@@ -19,6 +19,10 @@ Optional<FragmentedFrame> BasicEncoder::encode_next_frame(uint32_t curr_timestam
   std::normal_distribution<double> dis(1, 1e-5);
   auto multiplier = dis(e);
   uint32_t base_size_bytes = target_bitrate_byteps_ * 1 / fps_;
+
+  /* consider fec */
+  base_size_bytes = base_size_bytes / (1 + (fec_rate_ / 255.0f));
+
   uint32_t real_bytes = std::floor(multiplier * base_size_bytes);
   if (real_bytes == 0) {
     return {};
@@ -29,7 +33,7 @@ Optional<FragmentedFrame> BasicEncoder::encode_next_frame(uint32_t curr_timestam
   //cerr << "Encoding a new frame: size = " << real_bytes << " tgt_br = " << target_bitrate_byteps_ << endl;
   // note: time_to_next_frame is in MICRO-SECONDS (us)
   bool is_key_frame = (frame_id_ % gop_ == 1);
-  FragmentedFrame ret(0, 0, 0, frame_id_, 1000000 / fps_, data, is_key_frame);
+  FragmentedFrame ret(0, 0, 0, frame_id_, 1000000 / fps_, data, is_key_frame, fec_rate_);
 
   // update frame_observer
   for (auto obs : frame_observers_) {

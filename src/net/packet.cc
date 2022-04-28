@@ -72,6 +72,8 @@ Packet::Packet( const vector<uint8_t> & whole_frame,
     fragments_in_this_frame_( 0 ), /* temp value */
     time_since_last_( time_since_last ),
     send_timestamp_ms_(0), 
+    fec_rate_(0),
+    red_fragments_in_this_frame_(0),
     payload_()
 {
   assert( not whole_frame.empty() );
@@ -98,7 +100,9 @@ Packet::Packet( const Chunk & str )
     fragments_in_this_frame_( str( 16, 2 ).le16() ),
     time_since_last_( str( 18, 4 ).le32() ),
     send_timestamp_ms_( str( 22, 4 ).le32() ),
-    payload_( str( 26 ).to_string() )
+    fec_rate_( str( 26, 2 ).le16() ),
+    red_fragments_in_this_frame_( str( 28, 2 ).le16() ),
+    payload_( str( 30 ).to_string() )
 {
   if ( fragment_no_ >= fragments_in_this_frame_ ) {
     throw runtime_error( "invalid packet: fragment_no_ >= fragments_in_this_frame" );
@@ -120,6 +124,8 @@ Packet::Packet()
     fragments_in_this_frame_(),
     time_since_last_(),
     send_timestamp_ms_(),
+    fec_rate_(),
+    red_fragments_in_this_frame_(), 
     payload_()
 {}
 
@@ -136,6 +142,8 @@ string Packet::to_string() const
        + put_header_field( fragments_in_this_frame_ )
        + put_header_field( time_since_last_ )
        + put_header_field( send_timestamp_ms_ )
+       + put_header_field( fec_rate_ )
+       + put_header_field( red_fragments_in_this_frame_ )
        + payload_;
 }
 
@@ -152,7 +160,8 @@ FragmentedFrame::FragmentedFrame( const uint16_t connection_id,
                                   const uint32_t frame_no,
                                   const uint32_t time_since_last,
                                   const vector<uint8_t> & whole_frame,
-                                  bool is_key_frame )
+                                  const bool is_key_frame, 
+                                  const uint8_t fec_rate)
   : connection_id_( connection_id ),
     source_state_( source_state ),
     target_state_( target_state ),
@@ -160,7 +169,9 @@ FragmentedFrame::FragmentedFrame( const uint16_t connection_id,
     fragments_in_this_frame_(),
     fragments_(),
     remaining_fragments_( 0 ),
-    is_key_frame_ ( is_key_frame )
+    is_key_frame_ ( is_key_frame ),
+    fec_rate_(fec_rate),
+    num_fec_fragments_(0)
 {
   size_t next_fragment_start = 0;
 
@@ -170,6 +181,8 @@ FragmentedFrame::FragmentedFrame( const uint16_t connection_id,
                              frame_no, fragment_no, 0, next_fragment_start );
   }
 
+  gen_fec_packets(whole_frame);
+
   fragments_.front().set_time_to_next( time_since_last );
 
   fragments_in_this_frame_ = fragments_.size();
@@ -177,6 +190,8 @@ FragmentedFrame::FragmentedFrame( const uint16_t connection_id,
 
   for ( Packet & packet : fragments_ ) {
     packet.set_fragments_in_this_frame( fragments_in_this_frame_ );
+    packet.set_fec_rate(fec_rate);
+    packet.set_red_frags_in_this_frame( num_fec_fragments_ );
 
     if (is_key_frame_) {
       packet.set_key_frame();
@@ -194,11 +209,38 @@ FragmentedFrame::FragmentedFrame( const uint16_t connection_id,
     fragments_in_this_frame_( packet.fragments_in_this_frame() ),
     fragments_( packet.fragments_in_this_frame() ),
     remaining_fragments_( packet.fragments_in_this_frame() ),
-    is_key_frame_ ( packet.is_key_frame() )
+    is_key_frame_ ( packet.is_key_frame() ),
+    fec_rate_( packet.fec_rate() ),
+    num_fec_fragments_ ( packet.red_frags_in_this_frame() )
 {
   sanity_check( packet );
 
   add_packet( packet );
+}
+
+void FragmentedFrame::gen_fec_packets(const vector<uint8_t> & whole_frame)
+{
+  if (fec_rate_ == 0) return;
+  double fec_ratio = fec_rate_ / 255.0f;
+  uint32_t fec_size = whole_frame.size() * fec_ratio;
+  std::vector<uint8_t> fec_vec; 
+  auto effective_payload = ((whole_frame.size() - 1) / Packet::MAXIMUM_PAYLOAD + 1) * Packet::MAXIMUM_PAYLOAD;
+  fec_vec.resize(effective_payload + fec_size);
+
+  //cerr << "real payload: " << whole_frame.size() << ", effective_payload: " << effective_payload << endl
+  //     << " fec ratio: " << fec_ratio << ", fec total " << fec_vec.size() << endl;
+
+  auto original_pkts = fragments_.size();
+  size_t next_fragment_start = effective_payload;
+  for ( uint16_t fragment_no = original_pkts; next_fragment_start < fec_vec.size();
+        fragment_no++ ) {
+    cerr << " next fragment start is " << next_fragment_start << endl;
+    fragments_.emplace_back( fec_vec, connection_id_, source_state_, target_state_,
+                             frame_no_, fragment_no, 0, next_fragment_start );
+  }
+  auto after_pkts = fragments_.size();
+  num_fec_fragments_ = after_pkts - original_pkts;
+
 }
 
 void FragmentedFrame::sanity_check( const Packet & packet ) const {
@@ -255,7 +297,8 @@ void FragmentedFrame::send( UDPSocket & socket )
 
 bool FragmentedFrame::complete() const
 {
-  return remaining_fragments_ == 0;
+  // consider fec
+  return remaining_fragments_ <= num_fec_fragments_;
 }
 
 const vector<Packet> & FragmentedFrame::packets() const
@@ -275,8 +318,13 @@ string FragmentedFrame::frame() const
     throw runtime_error( "attempt to build frame from unfinished FragmentedFrame" );
   }
 
+  unsigned int index = 0;
   for ( const auto & fragment : fragments_ ) {
     ret.append( fragment.payload() );
+    index += 1;
+    if (index + num_fec_fragments_ == fragments_.size()) {
+      break;
+    }
   }
 
   return ret;
@@ -286,12 +334,16 @@ string FragmentedFrame::partial_frame() const
 {
   string ret;
 
+  unsigned int index = 0;
   for ( const auto & fragment : fragments_ ) {
     if ( not fragment.valid() ) {
       break;
     }
 
     ret.append( fragment.payload() );
+    if (index + num_fec_fragments_ == fragments_.size()) {
+      break;
+    }
   }
 
   return ret;
