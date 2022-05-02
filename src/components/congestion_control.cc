@@ -103,42 +103,74 @@ uint32_t SalsifyCongestionControl::query_grace_period(uint32_t frame_id)
   return 0;
 }
 
-void SalsifyCongestionControl::update_estimation(uint32_t recv_timestamp_ms, uint32_t grace_period_ms)
+void SalsifyCongestionControl::update_estimation(uint32_t recv_timestamp_ms, uint32_t grace_period_ms, uint32_t pkt_size)
 {
   assert(recv_timestamp_ms >= last_recv_ms_);
-  if (tao_ms_ <= 0) {
+  if (tao_ms_ < 0) {
     tao_ms_ = 0;  // skip the first packet
   }
   else { 
-    auto new_value = max(0l, static_cast<int64_t>(recv_timestamp_ms - last_recv_ms_ - grace_period_ms));
-    tao_ms_ = ALPHA * new_value + (1 - ALPHA) * tao_ms_;
+    (void)pkt_size;
+    auto new_value = max(0, static_cast<int>(recv_timestamp_ms - last_recv_ms_ - grace_period_ms));
+    //auto new_value = static_cast<int>(recv_timestamp_ms - last_recv_ms_);
+    //new_value = new_value * MTU / pkt_size;
+    //new_value = max(0, static_cast<int>(new_value - grace_period_ms));
+    if (tao_ms_ == 0) { // the first packet
+      tao_ms_ = new_value;
+    }
+    else {
+      tao_ms_ = ALPHA * new_value + (1 - ALPHA) * tao_ms_;
+    }
   }
   last_recv_ms_ = recv_timestamp_ms;
 }
 
 void SalsifyCongestionControl::post_updates()
 {
-  if (not (tao_ms_ >= 0)) return;
+  if (not (tao_ms_ > 0)) return;
   auto i32_tao_ms = max(1, static_cast<int>(tao_ms_)); // at least 1
-  int num = d_ms_ / i32_tao_ms - ni_;
+  int num = d_ms_ / i32_tao_ms - inflight_.size();
   num = max(num, 0); 
   
-  //cerr << "curr max pkts = " << num << endl;
   uint32_t exp_frame_size = num * MTU;
   uint32_t bitrate_byteps = exp_frame_size * fps_;
+  if (bitrate_byteps < MIN_RATE_BYTEPS) {
+    bitrate_byteps = MIN_RATE_BYTEPS;
+  }
   uint32_t pacing_byteps = bitrate_byteps * 5;
 
   //cerr << "SalsifyCongestionControl::post_update: target bitrate bps: " << bitrate_byteps
-  //     << " pacing rate bps: " << pacing_byteps << endl;
+  //     << " pacing rate bps: " << pacing_byteps 
+  //     << " available slots: " << d_ms_ / i32_tao_ms << endl;
 
   for (auto obs : observers_) {
     obs->post_updates(pacing_byteps, bitrate_byteps);
   }
 }
 
+void SalsifyCongestionControl::remove_expired_packets(uint32_t now_ms)
+{
+  /* need to wait for RTT estimation */
+  if (ewma_rtt_ms_ == 0) return; 
+
+  uint32_t earliest_sent_timestamp = now_ms - 3 * ewma_rtt_ms_;
+  for(auto it = inflight_.begin(); it != inflight_.end(); ) {
+    if (get<0>(*it) < earliest_sent_timestamp) {
+      it = inflight_.erase(it);
+    }
+    else {
+      break;
+    }
+  }
+}
+
 void SalsifyCongestionControl::on_packet_sent(uint32_t timestamp_ms, const Packet &p) 
 {
   stats_->on_packet_sent(timestamp_ms, p);
+
+  SeqNum seq = get_seq(p);
+  inflight_.insert(seq);
+
   if (last_sent_ms_ <= 0) {
     // initialize the states
     last_sent_ms_ = timestamp_ms;
@@ -148,28 +180,49 @@ void SalsifyCongestionControl::on_packet_sent(uint32_t timestamp_ms, const Packe
   // if it's the current frame, increase ni, update last send ms
   if (p.frame_no() == curr_frame_id_) {
     last_sent_ms_ = timestamp_ms;
-    ni_++;
   }
-  else {
+  else if (p.frame_no() > curr_frame_id_) {
     // new frame come, update grace period, and then update states
     auto grace_period_ms = timestamp_ms - last_sent_ms_;
     update_grace_period(p.frame_no(), grace_period_ms);
 
     curr_frame_id_ = p.frame_no();
     last_sent_ms_ = timestamp_ms;
-    ni_++;
   }
+  else {
+    last_sent_ms_ = timestamp_ms; 
+  }
+
+  //cerr << "[" << timestamp_ms << "] SEND packet " << p.frame_no() 
+  //     << " (in flight " << inflight_.size() << ")" << endl;
+  remove_expired_packets(timestamp_ms);
   post_updates();
 }
 
 void SalsifyCongestionControl::on_ack_received(uint32_t timestamp_ms, const AckPacket &p)
 {
   stats_->on_ack_received(timestamp_ms, p);
-  (void)timestamp_ms;
+  /* update inflight packets */
+  auto seq = get_seq(p);
+  inflight_.erase(seq);
+
+  /* update rtt */
+  auto rtt = timestamp_ms - p.send_time_ms();
+  if (ewma_rtt_ms_ == 0) {
+    ewma_rtt_ms_ = rtt;
+  }
+  else {
+    ewma_rtt_ms_ = ALPHA * rtt + (1-ALPHA) * ewma_rtt_ms_;
+  }
+
+  /* update grace period ms */
   auto recv_ms = p.arrive_time_ms();
   auto grace_period_ms = query_grace_period(p.frame_no());
-  ni_--;
-  update_estimation(recv_ms, grace_period_ms);
+  update_estimation(recv_ms, grace_period_ms, p.origin_pkt_size());
+  //cerr << "[" << timestamp_ms << "] RECV packet " << p.frame_no() 
+  //     << " (arrive at: " << recv_ms << ")"
+  //     << " (in flight " << inflight_.size() << ")" << endl;
+  remove_expired_packets(timestamp_ms);
   post_updates();
 }
 

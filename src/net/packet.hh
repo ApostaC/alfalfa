@@ -207,6 +207,7 @@ private:
 
   uint32_t arrive_time_ms_; // only used by comp framework
   uint32_t send_time_ms_; // only used by comp framework
+  uint32_t origin_pkt_size_; // only used by comp framework
 public:
   AckPacket( const uint16_t connection_id, const uint32_t frame_no,
              const uint16_t fragment_no, const uint32_t avg_delay,
@@ -225,10 +226,12 @@ public:
   uint32_t avg_delay() const { return avg_delay_; }
   uint32_t arrive_time_ms() const { return arrive_time_ms_; }
   uint32_t send_time_ms() const { return send_time_ms_; }
+  uint32_t origin_pkt_size() const { return origin_pkt_size_; }
 
   /* setters */
   void set_arrive_time(uint32_t arrive_time_ms) { arrive_time_ms_ = arrive_time_ms; }
   void set_send_time(uint32_t send_time_ms) { send_time_ms_ = send_time_ms; }
+  void set_origin_pkt_size(uint32_t origin_size) { origin_pkt_size_ = origin_size; }
 
   uint32_t current_state() const { return current_state_; }
   std::deque<uint32_t> complete_states() const { return complete_states_; }

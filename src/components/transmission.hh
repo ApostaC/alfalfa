@@ -36,6 +36,7 @@ private:
     Packet packet {};
     uint32_t num_rtx = 0;
     uint32_t last_sent_ms = 0;
+    bool is_waiting = false;
   };
 
   std::map<SeqNum, UnackedInfo> unacked_ {};    // unack queue

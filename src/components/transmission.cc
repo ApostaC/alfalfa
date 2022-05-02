@@ -58,12 +58,14 @@ void RTXManager::on_ack_received(uint32_t timestamp_ms, const AckPacket & ack, d
        rit != unacked_.rend(); ++rit) {
     auto & info = rit->second;
     
-    // if not retransmitted or retransmission is 1 RTT ago
+    // if not retransmitted or retransmission is 1 RTT ago and not in the waiting queue
     if (info.num_rtx == 0 or
-        timestamp_ms - info.last_sent_ms > ewma_rtt_ms_.get()) {
+        (timestamp_ms - info.last_sent_ms > ewma_rtt_ms_.get() and
+         info.is_waiting == false)) {
       info.num_rtx++;
-      info.last_sent_ms = timestamp_ms;
-      target_buf.push_back(info.packet);
+      //info.last_sent_ms = timestamp_ms;
+      info.is_waiting = true;
+      target_buf.push_front(info.packet);
     }
   }
 
@@ -73,6 +75,12 @@ void RTXManager::on_ack_received(uint32_t timestamp_ms, const AckPacket & ack, d
 
 void RTXManager::on_rtx_sent(uint32_t timestamp_ms, const Packet & pkt) 
 {
+  SeqNum seq{pkt.frame_no(), pkt.fragment_no()};
+  if (unacked_.count(seq) != 0){  // skip if it's alread acked!
+    auto info = unacked_.at(seq);
+    info.last_sent_ms = timestamp_ms;
+    info.is_waiting = false;
+  }
   sent_rtx_size_.emplace(timestamp_ms, pkt.to_string().length());
 }
 
@@ -158,6 +166,7 @@ TransSender::TransSender(const Address & peer_addr, uint32_t fps,
           uint32_t now_ms = timestamp_ms();
           // TODO: change the frame's interval here (need to matain last_encoded_frame_timestamp_ms_)
           auto frame = this->encoder_.encode_next_frame(now_ms);
+          auto old_queue_length = data_queue_.size();
           if (frame.initialized())
           {
             auto packets = frame.get().packets();
@@ -168,7 +177,9 @@ TransSender::TransSender(const Address & peer_addr, uint32_t fps,
 
           this->pacer_.set_pacing_rate(this->cached_pacing_rate_);
           cerr << "[" << now_ms << "] Queue length is " << data_queue_.size() 
-               << " cached pacing rate is " << this->cached_pacing_rate_ << endl;
+               << " cached pacing rate is " << this->cached_pacing_rate_ << endl
+               << "   old queue len = " << old_queue_length << endl
+               << "   rtx queue len = " << rtx_queue_.size() << endl;
           return ResultType::Continue;
         }));
 
@@ -213,6 +224,7 @@ void TransSender::send_one_packet(uint32_t now_ms)
     this->socket_.send(str);
     this->cc_.on_packet_sent(now_ms, packet);
     this->rtx_mgr_.on_rtx_sent(now_ms, packet);
+    cerr << "[" << now_ms << "] retrainsmitted packet " << packet.frame_no() << "," << packet.fragment_no() << endl;
     this->rtx_queue_.pop_front();
     return;
   }
@@ -287,6 +299,7 @@ TransReceiver::TransReceiver(const uint16_t port, DecoderInterface & decoder)
             /* curr state */ 0, /* complete state */ {}); 
         ack.set_arrive_time(now_ms);
         ack.set_send_time(packet.send_timestamp_ms());
+        ack.set_origin_pkt_size(new_datagram.payload.size());
         ack.sendto(this->socket_, new_datagram.source_address);
         return ResultType::Continue;
       }));

@@ -25,12 +25,12 @@ Optional<FragmentedFrame> BasicEncoder::encode_next_frame(uint32_t curr_timestam
 
   uint32_t real_bytes = std::floor(multiplier * base_size_bytes);
   if (real_bytes == 0) {
-    return {};
+    //return {};
+    real_bytes = 10; // generate a very small frame
   }
   std::vector<uint8_t> data;
   data.resize(real_bytes);
 
-  //cerr << "Encoding a new frame: size = " << real_bytes << " tgt_br = " << target_bitrate_byteps_ << endl;
   // note: time_to_next_frame is in MICRO-SECONDS (us)
   bool is_key_frame = (frame_id_ % gop_ == 1);
   FragmentedFrame ret(0, 0, 0, frame_id_, 1000000 / fps_, data, is_key_frame, fec_rate_);
@@ -39,5 +39,6 @@ Optional<FragmentedFrame> BasicEncoder::encode_next_frame(uint32_t curr_timestam
   for (auto obs : frame_observers_) {
     obs->new_complete_frame(curr_timestamp_ms, ret);
   }
+  cerr << "Encoding a new frame: " << frame_id_ << ", size = " << real_bytes << " tgt_br = " << target_bitrate_byteps_ << endl;
   return ret;
 }

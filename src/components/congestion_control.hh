@@ -69,17 +69,26 @@ public:
   virtual void on_ack_received(uint32_t timestamp_ms, const AckPacket &p) override;
 };
 
+
+/**
+ * class SalsifyCongestionControl:
+ * implements the congestion control from salsify's paper
+ */
 class SalsifyCongestionControl : public CongestionControlInterface
 {
 private:
+  constexpr static uint32_t MIN_RATE_BYTEPS = 50 * 125; // 50 kbps
   static constexpr double ALPHA = 0.1;
   static constexpr double MTU = 1400;
+  using SeqNum = std::tuple<uint32_t, uint32_t, uint16_t>; // send_time_ms, frame_no, frag_no
   
 private:
   // for calculating the number of packets: D / tao_i - Ni
   uint32_t d_ms_ {100};
   double tao_ms_ {-1};
-  uint32_t ni_ {0};
+  std::set<SeqNum> inflight_{};
+
+  double ewma_rtt_ms_ {0};
 
   uint32_t last_recv_ms_ {0};
   std::map<uint32_t, uint32_t> grace_periods_ {}; // key: frame_id (latter frame), value: grace_period in ms
@@ -93,8 +102,12 @@ private:
 private:
   void update_grace_period(uint32_t frame_id, uint32_t value_ms);
   uint32_t query_grace_period(uint32_t frame_id);
-  void update_estimation(uint32_t recv_timestamp_ms, uint32_t grace_period_ms);
+  void update_estimation(uint32_t recv_timestamp_ms, uint32_t grace_period_ms, uint32_t pkt_size);
   void post_updates();
+  void remove_expired_packets(uint32_t now_ms);
+
+  SeqNum get_seq(const Packet & p) { return {p.send_timestamp_ms(), p.frame_no(), p.fragment_no()}; }
+  SeqNum get_seq(const AckPacket & p) { return {p.send_time_ms(), p.frame_no(), p.fragment_no()}; }
 
 public:
   SalsifyCongestionControl(uint32_t D_ms, uint16_t fps);
@@ -105,6 +118,11 @@ public:
   void set_fps(uint16_t fps) { fps_ = fps; }
 };
 
+
+/**
+ * class GCCMinus
+ * A simplified version of GCC
+ */
 class GCCMinus : public CongestionControlInterface
 {
 public:
