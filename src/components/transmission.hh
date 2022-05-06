@@ -129,6 +129,7 @@ private:
 private:
   bool has_data_to_send() const { return not (data_queue_.empty() and rtx_queue_.empty()); }
   void send_one_packet(uint32_t now_ms);
+  void send_stop_message();
 
 public:
   TransSender(const Address & peer_addr, uint32_t fps, 
@@ -140,7 +141,7 @@ public:
   void start(uint32_t time_limt_ms = -1);
 
   // implements CongestionControlObserver
-  void post_updates(uint32_t sending_rate_byteps, uint32_t target_bitrate_byteps) override; 
+  void post_updates(uint32_t sending_rate_byteps, uint32_t target_bitrate_byteps, double loss_rate) override; 
 };
 
 
@@ -153,6 +154,8 @@ private:
   Poller poller_ {};
   UDPSocket socket_{};
   DecoderInterface & decoder_;
+
+  bool stop_received_ {false};
   
 public:
   TransReceiver(const uint16_t port, DecoderInterface & decoder);

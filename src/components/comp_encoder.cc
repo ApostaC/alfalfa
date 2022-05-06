@@ -11,6 +11,14 @@ BasicEncoder::BasicEncoder(uint32_t init_bitrate_byteps, uint16_t fps)
 {
 }
 
+void BasicEncoder::set_loss_rate(double loss_rate)
+{
+  // compute FEC rate
+  auto fec_ratio = min(loss_rate * protection_overhead_, 0.5);
+  auto fec_rate_d = min(fec_ratio / (1 - fec_ratio), 1.);
+  fec_rate_ = 255 * fec_rate_d;
+}
+
 Optional<FragmentedFrame> BasicEncoder::encode_next_frame(uint32_t curr_timestamp_ms)
 {
   frame_id_ += 1;
@@ -39,6 +47,7 @@ Optional<FragmentedFrame> BasicEncoder::encode_next_frame(uint32_t curr_timestam
   for (auto obs : frame_observers_) {
     obs->new_complete_frame(curr_timestamp_ms, ret);
   }
-  cerr << "Encoding a new frame: " << frame_id_ << ", size = " << real_bytes << " tgt_br = " << target_bitrate_byteps_ << endl;
+  cerr << "Encoding a new frame: " << frame_id_ << ", size = " << real_bytes 
+       << " tgt_br = " << target_bitrate_byteps_ << ", fec_rate = " << fec_rate_ / 255.0 << endl;
   return ret;
 }

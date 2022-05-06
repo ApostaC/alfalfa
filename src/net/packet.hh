@@ -40,6 +40,11 @@
 
 class Packet
 {
+public:
+  /* control signals */
+  static constexpr uint16_t NORMAL = 0;
+  static constexpr uint16_t STOP = 1;
+
 private:
   bool valid_;
 
@@ -54,6 +59,7 @@ private:
 
   uint16_t fec_rate_; // 0 --> 0, 255 --> 100%
   uint16_t red_fragments_in_this_frame_; // 0 --> 0, 255 --> 100%
+  uint16_t control_signal_;
 
   std::string payload_;
 
@@ -66,6 +72,7 @@ public:
 
   /* setters */
   void set_send_timestamp_ms(uint32_t send_timestamp_ms) { send_timestamp_ms_ = send_timestamp_ms; }
+  void set_stop() { control_signal_ = STOP; }
 
   /* getters */
   bool valid() const { return valid_; }
@@ -78,6 +85,7 @@ public:
   uint32_t time_since_last() const { return time_since_last_; }
   uint32_t send_timestamp_ms() const { return send_timestamp_ms_; }
   const std::string & payload() const { return payload_; }
+  uint16_t control_signal() const { return control_signal_; }
 
   /* for non-salsify encoders, reuse source_state and target_state as key-frame identifier */
   void set_key_frame() { source_state_ = 0u; target_state_ = ~0u; }

@@ -74,6 +74,7 @@ Packet::Packet( const vector<uint8_t> & whole_frame,
     send_timestamp_ms_(0), 
     fec_rate_(0),
     red_fragments_in_this_frame_(0),
+    control_signal_(0),
     payload_()
 {
   assert( not whole_frame.empty() );
@@ -102,13 +103,14 @@ Packet::Packet( const Chunk & str )
     send_timestamp_ms_( str( 22, 4 ).le32() ),
     fec_rate_( str( 26, 2 ).le16() ),
     red_fragments_in_this_frame_( str( 28, 2 ).le16() ),
-    payload_( str( 30 ).to_string() )
+    control_signal_( str( 30, 2 ).le16() ),
+    payload_( str( 32 ).to_string() )
 {
   if ( fragment_no_ >= fragments_in_this_frame_ ) {
     throw runtime_error( "invalid packet: fragment_no_ >= fragments_in_this_frame" );
   }
 
-  if ( payload_.empty() ) {
+  if ( payload_.empty() and control_signal_ == 0) {
     throw runtime_error( "invalid packet: empty payload" );
   }
 }
@@ -126,6 +128,7 @@ Packet::Packet()
     send_timestamp_ms_(),
     fec_rate_(),
     red_fragments_in_this_frame_(), 
+    control_signal_(), 
     payload_()
 {}
 
@@ -144,6 +147,7 @@ string Packet::to_string() const
        + put_header_field( send_timestamp_ms_ )
        + put_header_field( fec_rate_ )
        + put_header_field( red_fragments_in_this_frame_ )
+       + put_header_field( control_signal_ )
        + payload_;
 }
 

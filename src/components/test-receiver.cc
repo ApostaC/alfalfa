@@ -16,7 +16,7 @@ namespace {
 
 void print_usage(char *argv[])
 {
-  cerr << "Usage: " << argv[0] << " <port>" << endl;
+  cerr << "Usage: " << argv[0] << " <port> <output file>" << endl;
 }
 
 void dump_output_time()
@@ -42,10 +42,11 @@ int main(int argc, char *argv[])
   signal(SIGINT, sigint_handler);
   output_csv = "test-receiver.csv";
 
-  if (argc != 2) {
+  if (argc != 3) {
     print_usage(argv);
     exit(1);
   }
+  output_csv = argv[2];
 
   BlockingDecoder decoder;
   RTXManager rtx_mgr;
@@ -57,6 +58,8 @@ int main(int argc, char *argv[])
   auto receiver = std::make_shared<TransReceiver>(port, decoder);
   
   cout << "Starting receiver!" << endl;
-  receiver->start();
+  uint32_t limit_ms = -1;
+  receiver->start(limit_ms);
+  dump_output_time();
   return 0;
 }

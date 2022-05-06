@@ -10,6 +10,7 @@ void CCStatsRecorder::trigger_log(uint32_t timestamp_ms)
     cerr << "[" << timestamp_ms << "] During last " << log_period_ << " ms" << endl
          << "   Sent " << pkt_counter_ << " packets " << size_counter_ << " bytes " << endl
          << "   Received " << ack_counter_ << " acks, avg delay = " << moving_delay_ << " ms" << endl
+         << "   est. loss = " << loss_rate_ << endl
          << "   Pacing rate = " << sending_rate_ / 125. << "kbps" << endl
          << "   target bitrate = " << target_bitrate_ / 125. << "kbps" << endl;
     pkt_counter_ = 0;
@@ -61,7 +62,7 @@ void DumbCongestionControl::on_packet_sent(uint32_t timestamp_ms, const Packet &
   size_counter_ += p.to_string().length();
 
   for (auto obs : observers_) {
-    obs->post_updates(1000*125, 800*125);
+    obs->post_updates(1000*125, 800*125, 0);
   }
 }
 
@@ -75,9 +76,62 @@ void DumbCongestionControl::on_ack_received(uint32_t timestamp_ms, const AckPack
   ack_counter_ += 1;
   moving_delay_ = ack.avg_delay() * 0.2 + moving_delay_ * 0.8;
   for (auto obs : observers_) {
-    obs->post_updates(1000*125, 800*125);
+    obs->post_updates(1000*125, 800*125, 0);
   }
 }
+
+/* CLASS OracleCongestionControl */
+
+void OracleCongestionControl::post_updates()
+{
+  auto bw = get_bw();
+  auto loss = get_loss();
+  for (auto obs : observers_) {
+    obs->post_updates(bw, bw * 0.9, loss);
+  }
+}
+
+void OracleCongestionControl::on_packet_sent(uint32_t ts, const Packet & p) 
+{
+  stats_->on_packet_sent(ts, p);
+}
+
+void OracleCongestionControl::on_ack_received(uint32_t ts, const AckPacket & ack) 
+{
+  stats_->on_ack_received(ts, ack);
+}
+
+void OracleCongestionControl::set_bw(uint32_t bw_byteps) 
+{
+  {
+    unique_lock<mutex> lock(mut_);
+    real_bw_byteps_ = bw_byteps;
+  }
+  post_updates();
+}
+
+void OracleCongestionControl::set_loss(double loss_rate)
+{
+  {
+    unique_lock<mutex> lock(mut_);
+    real_loss_rate_ = loss_rate;
+  }
+  post_updates();
+}
+
+uint32_t OracleCongestionControl::get_bw()
+{
+  unique_lock<mutex> lock(mut_);
+  return real_bw_byteps_;
+}
+
+double OracleCongestionControl::get_loss()
+{
+  unique_lock<mutex> lock(mut_);
+  return real_loss_rate_;
+}
+
+/* CLASS SalsifyCongestionControl*/
 
 SalsifyCongestionControl::SalsifyCongestionControl(uint32_t D_ms, uint16_t fps)
   : d_ms_(D_ms), fps_(fps)
@@ -143,8 +197,9 @@ void SalsifyCongestionControl::post_updates()
   //     << " pacing rate bps: " << pacing_byteps 
   //     << " available slots: " << d_ms_ / i32_tao_ms << endl;
 
+  auto loss_rate = loss_calc_.get_loss_rate();
   for (auto obs : observers_) {
-    obs->post_updates(pacing_byteps, bitrate_byteps);
+    obs->post_updates(pacing_byteps, bitrate_byteps, loss_rate);
   }
 }
 
@@ -167,6 +222,7 @@ void SalsifyCongestionControl::remove_expired_packets(uint32_t now_ms)
 void SalsifyCongestionControl::on_packet_sent(uint32_t timestamp_ms, const Packet &p) 
 {
   stats_->on_packet_sent(timestamp_ms, p);
+  loss_calc_.on_packet_sent(timestamp_ms, p);
 
   SeqNum seq = get_seq(p);
   inflight_.insert(seq);
@@ -202,6 +258,8 @@ void SalsifyCongestionControl::on_packet_sent(uint32_t timestamp_ms, const Packe
 void SalsifyCongestionControl::on_ack_received(uint32_t timestamp_ms, const AckPacket &p)
 {
   stats_->on_ack_received(timestamp_ms, p);
+  loss_calc_.on_ack_received(timestamp_ms, p);
+
   /* update inflight packets */
   auto seq = get_seq(p);
   inflight_.erase(seq);
@@ -402,13 +460,13 @@ void GCCMinus::OveruseDetector::update(double m_i)
   }
 }
 
-void GCCMinus::LossCalculator::on_packet_sent(uint32_t, const Packet & p)
+void LossCalculator::on_packet_sent(uint32_t, const Packet & p)
 {
   auto seq = get_seq(p);
   unacked_.insert(seq);
 }
 
-void GCCMinus::LossCalculator::on_ack_received(uint32_t, const AckPacket & ack)
+void LossCalculator::on_ack_received(uint32_t, const AckPacket & ack)
 {
   auto seq = get_seq(ack);
   latest_ack_timestamp_ms_ = max(get<0>(seq), latest_ack_timestamp_ms_);
@@ -417,7 +475,7 @@ void GCCMinus::LossCalculator::on_ack_received(uint32_t, const AckPacket & ack)
   //cerr << "LOSS: acked packet " << get<0>(seq) << " " << get<1>(seq) << " " << get<2>(seq) << endl;
 }
 
-double GCCMinus::LossCalculator::get_loss_rate()
+double LossCalculator::get_loss_rate()
 {
   if (latest_ack_timestamp_ms_ == 0) {
     return 0;
@@ -541,11 +599,12 @@ GCCMinus::GCCMinus()
 void GCCMinus::post_updates(uint32_t now_ms)
 {
   auto estimated_rate = aimd_.get_rate_estimation(now_ms);
+  auto loss_rate = loss_calc_.get_loss_rate();
   //cerr << "GCC: estimated_rate: " << estimated_rate << endl;
   (void)(now_ms);
   for (auto obs : observers_) {
     //obs->post_updates(2000 * 125, 1900 * 125);
-    obs->post_updates(estimated_rate, estimated_rate * 0.9);
+    obs->post_updates(estimated_rate, estimated_rate * 0.9, loss_rate);
   }
 }
 

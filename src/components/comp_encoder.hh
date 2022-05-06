@@ -5,6 +5,9 @@
 #include "frame_observer.hh"
 #include "optional.hh"
 
+/**
+ * basic interface for a encoder
+ */
 class EncoderInterface 
 {
 protected:
@@ -13,6 +16,7 @@ protected:
 public:
   // main interface
   virtual void set_target_bitrate(uint32_t bitrate_byteps) = 0;
+  virtual void set_loss_rate(double loss_rate) = 0;
   virtual Optional<FragmentedFrame> encode_next_frame(uint32_t curr_timestamp_ms) = 0;
 
   // adding observer
@@ -31,6 +35,8 @@ private:
   uint32_t gop_ {DEFAULT_GOP};
   uint8_t fec_rate_ {0};
 
+  double protection_overhead_ {1};
+
   constexpr static int DEFAULT_GOP = 250; 
 
 public:
@@ -40,8 +46,15 @@ public:
   uint32_t gop() { return gop_; }
 
   virtual void set_target_bitrate(uint32_t bitrate_byteps) override {target_bitrate_byteps_ = bitrate_byteps;}
+  virtual void set_loss_rate(double loss_rate) override;
   virtual Optional<FragmentedFrame> encode_next_frame(uint32_t curr_timestamp_ms) override;
 
+  /**
+   * set the protection overhead: [1.0, 2.0]
+   * fec_ratio = max(protection_overhead * estimated_loss_rate, 50)
+   * fec_rate = fec_ratio / (1 - fec_ratio)
+   */
+  void set_protection_overhead(double overhead) { protection_overhead_ = overhead; };
   void set_fec_rate(uint8_t fec_rate) { fec_rate_ = fec_rate; }
   uint8_t fec_rate() const { return fec_rate_; }
 };

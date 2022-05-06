@@ -6,6 +6,7 @@
 #include "congestion_control.hh"
 #include "frame_observer.hh"
 #include "transmission.hh"
+#include "bw_control.hh"
 
 #ifdef NDEBUG
 #undef NDEBUG
@@ -216,7 +217,7 @@ bool test_trans()
 
 bool test_fec()
 {
-  out_green(cerr) << "============== test: trans ================="; out_normal(cerr) << endl;
+  out_green(cerr) << "============== test: fec ================="; out_normal(cerr) << endl;
   uint32_t fps = 25;
   BasicEncoder encoder(2500 * 125, fps);
   auto f1 = encoder.encode_next_frame(0);
@@ -246,7 +247,34 @@ bool test_fec()
     assert(exp_res.count(ent.first) > 0);
     assert(exp_res.at(ent.first) == ent.second);
   }
-  out_green(cerr) << "-------------- PASSED: trans ----------------"; out_normal(cerr) << endl;
+  out_green(cerr) << "-------------- PASSED: fec ----------------"; out_normal(cerr) << endl;
+  return true;
+}
+
+bool test_bw_control()
+{
+  out_green(cerr) << "============== test: bandwidth controller ================="; out_normal(cerr) << endl;
+  BandwidthController ctrl("../../test/test-bw.csv", "enp4s0", 300);
+  auto & orac_cc = ctrl.get_oracle_cc();
+  (void)orac_cc;
+  using namespace std::chrono_literals;
+  ctrl.start();
+
+  this_thread::sleep_for(1s);
+  auto val = orac_cc.get_bw();
+  auto val2 = orac_cc.get_loss();
+  cerr << "bw and loss is " << val << " " << val2 << endl;
+  assert(val == 5000 * 125);
+  assert(val2 == 0.05);
+
+  this_thread::sleep_for(6s);
+  val = orac_cc.get_bw();
+  val2 = orac_cc.get_loss();
+  cerr << "bw and loss is " << val << " " << val2 << endl;
+  assert(val == 1500 * 125);
+  assert(val2 == 0.03);
+  ctrl.stop();
+  out_green(cerr) << "-------------- PASSED: bandwidth controller ----------------"; out_normal(cerr) << endl;
   return true;
 }
 
@@ -262,4 +290,5 @@ int main(int argc, char *argv[])
   test_rtx_mgr();
   test_fec();
   test_trans();
+  test_bw_control();
 }

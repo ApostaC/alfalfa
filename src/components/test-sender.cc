@@ -10,6 +10,7 @@
 #include "comp_encoder.hh"
 #include "frame_observer.hh"
 #include "timestamp.hh"
+#include "bw_control.hh"
 
 using namespace std; 
 
@@ -20,7 +21,7 @@ namespace {
 
 void print_usage(char *argv[])
 {
-  cerr << "Usage: " << argv[0] << " <ip> <port> <fec rate>" << endl;
+  cerr << "Usage: " << argv[0] << " <ip> <port> <fec rate> <output file>" << endl;
 }
 
 void dump_output_time()
@@ -50,15 +51,16 @@ int main(int argc, char *argv[])
   signal(SIGINT, sigint_handler);
   output_csv = "test-sender.csv";
 
-  if (argc != 4) {
+  if (argc != 5) {
     print_usage(argv);
     exit(1);
   }
+  output_csv = argv[4];
 
   // start TC
   int err;
   err = system("sudo tc qdisc del dev ingress root");
-  err = system("sudo tc qdisc add dev ingress root handle 1: tbf rate 1000kbit buffer 1500 latency 300ms");
+  err = system("sudo tc qdisc add dev ingress root handle 1: tbf rate 5000kbit buffer 1500 latency 300ms");
   if (err) {
     throw runtime_error("Cannot start TC tbf");
   }
@@ -67,13 +69,19 @@ int main(int argc, char *argv[])
   //  throw runtime_error("Cannot start TC netem");
   //}
 
+  BandwidthController bw_ctrl("../../test/test-loss.csv", "ingress", 300);
 
   int fps = 25;
   BasicEncoder encoder(500 * 125, fps);
-  double fec_rate = std::stod(argv[3]);
-  encoder.set_fec_rate(255u * fec_rate);
-  SalsifyCongestionControl cc(100, fps);
-  //GCCMinus cc;
+  encoder.set_protection_overhead(std::stod(argv[3]));
+  //double fec_rate = std::stod(argv[3]);
+  //encoder.set_fec_rate(255u * fec_rate);
+
+  //SalsifyCongestionControl cc(100, fps);
+  GCCMinus cc;
+  cc.set_initial_rate_estimation(bw_ctrl.init_bandwidth_byteps() * 0.6);
+  OracleCongestionControl & orac_cc = bw_ctrl.get_oracle_cc();
+
   RTXManager rtx_mgr;
 
   encode_time_recorder = std::make_shared<CompleteFrameObserver>();
@@ -81,25 +89,16 @@ int main(int argc, char *argv[])
 
   auto sender = std::make_shared<TransSender>(Address(argv[1], argv[2]), fps, std::ref(cc), std::ref(encoder), std::ref(rtx_mgr));
   cc.add_observer(sender);
-
-  // start a thread throttoles the bandwidth at 5 sec
-  //using namespace std::chrono_literals;
-  //thread tc_change([](){
-  //      this_thread::sleep_for(5s);
-  //      int err = system("sudo tc qdisc change dev ingress root handle 1: tbf rate 300kbit buffer 1500 limit 10000");
-  //      if (err != 0) {
-  //        cerr << "Warning: channot change TC bitrate control!" << endl;
-  //      }
-  //      return;
-  //    });
+  //auto sender = std::make_shared<TransSender>(Address(argv[1], argv[2]), fps, std::ref(orac_cc), std::ref(encoder), std::ref(rtx_mgr));
+  //orac_cc.add_observer(sender);
 
   cout << "Starting sender!" << endl;
   uint32_t limit_ms = 12 * 1000;
+  bw_ctrl.start();
   sender->start(limit_ms);
-  dump_output_time();
 
-  //tc_change.join();
-  err = system("sudo tc -s qdisc ls dev ingress"); // show tc status before exit
-  err = system("sudo tc qdisc del dev ingress root");
+  bw_ctrl.stop();
+  dump_output_time();
+  (void)orac_cc;
   return 0;
 }
