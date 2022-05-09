@@ -104,7 +104,10 @@ Packet::Packet( const Chunk & str )
     fec_rate_( str( 26, 2 ).le16() ),
     red_fragments_in_this_frame_( str( 28, 2 ).le16() ),
     control_signal_( str( 30, 2 ).le16() ),
-    payload_( str( 32 ).to_string() )
+    svc_layer_no_( str(32, 2).le16() ),
+    svc_layer_offset_( str(34, 2).le16() ),
+    svc_layer_size_( str(36, 2).le16() ),
+    payload_( str( 38 ).to_string() )
 {
   if ( fragment_no_ >= fragments_in_this_frame_ ) {
     throw runtime_error( "invalid packet: fragment_no_ >= fragments_in_this_frame" );
@@ -148,6 +151,9 @@ string Packet::to_string() const
        + put_header_field( fec_rate_ )
        + put_header_field( red_fragments_in_this_frame_ )
        + put_header_field( control_signal_ )
+       + put_header_field( svc_layer_no_ )
+       + put_header_field( svc_layer_offset_ )
+       + put_header_field( svc_layer_size_ )
        + payload_;
 }
 
@@ -350,6 +356,85 @@ string FragmentedFrame::partial_frame() const
   }
 
   return ret;
+}
+
+/* SVCFrame */
+SVCFrame::SVCFrame(uint32_t frame_no,
+                   std::vector<FragmentedFrame> && layers)
+  : frame_no_(frame_no)
+{
+  /* get packet and rewrite the header for each layer */
+  /**
+   * header rewritting:
+   * frame_no -> svc_layer_no
+   * frag_no -> svc_layer_offset
+   * num_frags -> svc_layer_size
+   *
+   * frame_no <- real frame no
+   * frag_no <- real frag no
+   * num_frags <- real num frags
+   */
+  for (auto && layer : layers) {
+    auto layer_no = layer.frame_no();
+    layers_.emplace(layer_no, move(layer));
+  }
+
+  for (auto & ent : layers_) {
+    auto & layer = ent.second;
+    auto & pkts = layer.packets();
+    for (auto & pkt : pkts) {
+      fragments_.push_back(pkt);
+      auto & newpkt = fragments_.back();
+      newpkt.set_svc(true);
+      newpkt.set_svc_layer_no(newpkt.frame_no());
+      newpkt.set_svc_layer_size(newpkt.fragments_in_this_frame());
+      newpkt.set_svc_layer_offset(newpkt.fragment_no());
+      newpkt.set_frame_no(frame_no_);
+    }
+  }
+
+  /* rewrite num_frags and frag_no */
+  auto total_frags = fragments_.size();
+  auto frag_id = 0;
+  for (auto & pkt : fragments_) {
+    pkt.set_fragments_in_this_frame(total_frags);
+    pkt.set_fragment_no(frag_id);
+    frag_id++;
+  }
+}
+
+SVCFrame::SVCFrame(const Packet & pkt)
+  : frame_no_(pkt.frame_no())
+{
+  add_packet(pkt);
+}
+
+void SVCFrame::add_packet(const Packet & pkt)
+{
+  /* restore the header and push it into layers */ 
+  /**
+   * header rewritting:
+   * frame_no <- svc_layer_no
+   * frag_no <- svc_layer_offset
+   * num_frags <- svc_layer_size
+   */
+  fragments_.push_back(pkt);
+  auto pkt_copy = pkt;
+  pkt_copy.set_frame_no(pkt_copy.svc_layer_no());
+  pkt_copy.set_fragment_no(pkt_copy.svc_layer_offset());
+  pkt_copy.set_fragments_in_this_frame(pkt_copy.svc_layer_size());
+
+  /* add frame into layer */
+  if (layers_.count(pkt_copy.svc_layer_no()) == 0) {
+    //layers_.emplace(piecewise_construct, 
+    //                pkt_copy.svc_layer_no(), 
+    //                forward_as_tuple(0, ref(pkt_copy)));
+    layers_.insert( make_pair(pkt_copy.svc_layer_no(), 
+                              FragmentedFrame(0, pkt_copy)) );
+  }
+  else {
+    layers_.at(pkt_copy.svc_layer_no()).add_packet(pkt_copy);
+  }
 }
 
 /* AckPacket */

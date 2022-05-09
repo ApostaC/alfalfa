@@ -242,6 +242,7 @@ bool test_fec()
   
   auto & res = frame_obs->arrival_time();
   decltype(res) exp_res {{2, f2.get().get_num_payload_fragments()}};
+  (void)(exp_res);
   for(auto ent : res) {
     cerr << "Result: " << ent.first << " " << ent.second << endl;
     assert(exp_res.count(ent.first) > 0);
@@ -254,7 +255,7 @@ bool test_fec()
 bool test_bw_control()
 {
   out_green(cerr) << "============== test: bandwidth controller ================="; out_normal(cerr) << endl;
-  BandwidthController ctrl("../../test/test-bw.csv", "enp4s0", 300);
+  BandwidthController ctrl("./test-bw.csv", "enp4s0", 300);
   auto & orac_cc = ctrl.get_oracle_cc();
   (void)orac_cc;
   using namespace std::chrono_literals;
@@ -278,6 +279,45 @@ bool test_bw_control()
   return true;
 }
 
+bool test_svc_frame()
+{
+  out_green(cerr) << "============== test: svc frame ================="; out_normal(cerr) << endl;
+  BasicEncoder enc(500 * 125, 25);
+
+  std::vector<FragmentedFrame> layers;
+  layers.emplace_back(move(enc.encode_next_frame(0).get()));
+  layers.emplace_back(move(enc.encode_next_frame(0).get()));
+  layers.emplace_back(move(enc.encode_next_frame(0).get()));
+
+  SVCFrame svc_frame(10, move(layers));
+  auto packets = svc_frame.fragments();
+  int frag_id = 0;
+  /* check frame rewritting */
+  for (auto & pkt : packets) {
+    assert(pkt.frame_no() == 10);
+    assert(pkt.fragment_no() == frag_id);
+    cerr << "pkt: " << pkt.frame_no() << "," << pkt.fragment_no() 
+         << " have the svc info: " << pkt.svc_layer_no() << "," << pkt.svc_layer_offset()
+         << " (" << pkt.svc_layer_size() << ")" << endl;
+    ++frag_id;
+  }
+
+  /* check reconstruct */
+  SVCFrame rec_frame(packets[3]);
+  assert(rec_frame.frame_no() == 10);
+  for (unsigned i = 0; i < packets.size() - 1; i++) {
+    rec_frame.add_packet(packets[i]);
+  }
+  assert(rec_frame.get_layer(1).complete());
+  assert(rec_frame.get_layer(2).complete());
+  assert(not rec_frame.get_layer(3).complete());
+  rec_frame.add_packet(packets[packets.size() - 1]);
+  assert(rec_frame.get_layer(3).complete());
+
+  out_green(cerr) << "-------------- PASSED: svc frame ----------------"; out_normal(cerr) << endl;
+  return true;
+}
+
 int main(int argc, char *argv[])
 {
   (void)(argc);
@@ -286,6 +326,7 @@ int main(int argc, char *argv[])
   out_normal(cerr) << endl;
 
   test_basic_encoder_decoder();
+  test_svc_frame();
   test_blocking_decoder();
   test_rtx_mgr();
   test_fec();

@@ -32,6 +32,7 @@
 #include <vector>
 #include <deque>
 #include <cassert>
+#include <map>
 
 #include "chunk.hh"
 #include "socket.hh"
@@ -57,9 +58,18 @@ private:
   uint32_t time_since_last_; /* microseconds */
   uint32_t send_timestamp_ms_; /* milliseconds */
 
+  /* fec related */
   uint16_t fec_rate_; // 0 --> 0, 255 --> 100%
   uint16_t red_fragments_in_this_frame_; // 0 --> 0, 255 --> 100%
+
+  /* stop the transmission */
   uint16_t control_signal_;
+
+  /* svc related */
+  bool is_svc_ {false};           // NOTE: only used by the sender! receiver never use this field
+  uint16_t svc_layer_no_ {0};     // layer id
+  uint16_t svc_layer_offset_ {0}; // index of packets in this layer 
+  uint16_t svc_layer_size_ {0}; // number of packets in the current layer
 
   bool is_retrans_ {false}; // only used by the sender! receiver never use this field
   std::string payload_;
@@ -76,6 +86,14 @@ public:
   void set_stop() { control_signal_ = STOP; }
   void set_retrans() { is_retrans_ = true; }
 
+  void set_svc(bool issvc) { is_svc_ = issvc; }
+  void set_svc_layer_no(uint16_t layer_no) { svc_layer_no_ = layer_no; }
+  void set_svc_layer_size(uint16_t layer_size) { svc_layer_size_ = layer_size; }
+  void set_svc_layer_offset(uint16_t layer_off) { svc_layer_offset_ = layer_off; }
+
+  void set_frame_no(uint32_t frame_no) { frame_no_ = frame_no; } // used by svc rewritting
+  void set_fragment_no(uint16_t fragment_no) { fragment_no_ = fragment_no; } // used by svc rewriting 
+
   /* getters */
   bool valid() const { return valid_; }
   uint16_t connection_id() const { return connection_id_; }
@@ -89,6 +107,11 @@ public:
   const std::string & payload() const { return payload_; }
   uint16_t control_signal() const { return control_signal_; }
   bool is_retrans() const { return is_retrans_; }
+
+  bool is_svc() const { return is_svc_; }
+  uint16_t svc_layer_no() const { return svc_layer_no_; }
+  uint16_t svc_layer_size() const { return svc_layer_size_; }
+  uint16_t svc_layer_offset() const { return svc_layer_offset_; }
 
   /* for non-salsify encoders, reuse source_state and target_state as key-frame identifier */
   void set_key_frame() { source_state_ = 0u; target_state_ = ~0u; }
@@ -125,7 +148,7 @@ public:
 
 class FragmentedFrame
 {
-private:
+protected:
   uint16_t connection_id_;
   uint32_t source_state_;
   uint32_t target_state_;
@@ -142,7 +165,7 @@ private:
   uint8_t fec_rate_ {0};
   uint16_t num_fec_fragments_ {0};
 
-private:
+protected:
   void gen_fec_packets(const std::vector<uint8_t> & whole_frame);
 
 public:
@@ -203,6 +226,40 @@ public:
       fec_rate_( other.fec_rate_),
       num_fec_fragments_( other.num_fec_fragments_ )
   {}
+};
+
+/**
+ * consists of a list of FragmentedFrames
+ * the frame_no() in any fragmentedframe is the layer no
+ */
+class SVCFrame 
+{
+private:
+  uint32_t frame_no_ {};
+  std::map<int, FragmentedFrame> layers_ {};
+  std::vector<Packet> fragments_ {};
+
+public:
+  SVCFrame(uint32_t frame_no,
+           std::vector<FragmentedFrame> && layers);
+  SVCFrame(const Packet & pkt);
+  SVCFrame(SVCFrame && other) noexcept
+    : frame_no_(other.frame_no_),
+      layers_( move(other.layers_) ),
+      fragments_( move(other.fragments_) )
+      {}
+
+  /* deleted copy-constructor */
+  SVCFrame(const SVCFrame &) = delete;
+  SVCFrame & operator=(const SVCFrame &) = delete;
+
+  /* getters */
+  const FragmentedFrame & get_layer(int index) const { return layers_.at(index); }
+  const std::vector<Packet> & fragments() const { return fragments_; }
+  uint32_t frame_no() const { return frame_no_; }
+
+  /* incoming packet */
+  void add_packet(const Packet & pkt);
 };
 
 class AckPacket
