@@ -8,6 +8,23 @@
 #include <vector>
 #include "packet.hh"  
 
+/* Main interfaces */
+class CongestionControlObserver;
+class CongestionControlInterface;
+
+/* Helper classes */
+class CCStatsRecorder;
+class LossCalculator;
+
+/* CC classes */
+class DumbCongestionControl;
+class GCCMinus;
+class SalsifyCongestionControl;
+class BBRMinus;
+
+
+
+
 class CongestionControlObserver 
 {
 public:
@@ -31,6 +48,9 @@ public:
   void add_observer(ObserverPtr obs) { observers_.push_back(obs); this->on_observer_added(obs); }
   virtual ~CongestionControlInterface() = default;
 };
+
+
+
 
 /**
  * helper function to calculate number of packets sent and received
@@ -87,6 +107,34 @@ public:
    */
   double get_loss_rate(); // real loss rate = return value / 65535.0f
 };
+
+/**
+ * helper class to calculate the receiving rate per UPDATE_INTERVAL_MS ms
+ * the rate is averaged among the latest WINDOW_MS ms
+ */
+class RateEstimator
+{
+private:
+  constexpr static uint32_t WINDOW_MS = 300; // calculate avg recv rate in latest XXX ms
+  constexpr static uint32_t UPDATE_INTERVAL_MS = 50; // update every 50 ms
+  
+  using SeqNum = std::pair<uint32_t, uint16_t>; // frame_no, frag_no
+
+private:
+  std::map<SeqNum, Packet> unacked_ {};
+  std::multimap<uint32_t, uint32_t> acked_bytes_ {};  // acked bytes in the last window
+
+  uint32_t estimate_rate_byteps_ {100 * 125}; // default 100kbps
+  uint32_t last_update_ms_ {0};
+public:
+  void on_packet_sent(uint32_t timestamp_ms, const Packet & pkt);
+  void on_ack_received(uint32_t timestamp_ms, const AckPacket & pkt);
+
+  uint32_t get_rate_estimation() const { return estimate_rate_byteps_; }
+};
+
+
+
 
 class DumbCongestionControl : public CongestionControlInterface
 {
@@ -195,30 +243,6 @@ public:
 
 public:
 
-  /**
-   * calculate the receiving rate per UPDATE_INTERVAL_MS ms
-   * the rate is averaged among the latest WINDOW_MS ms
-   */
-  class RateEstimator
-  {
-    private:
-      constexpr static uint32_t WINDOW_MS = 300; // calculate avg recv rate in latest XXX ms
-      constexpr static uint32_t UPDATE_INTERVAL_MS = 50; // update every 50 ms
-      
-      using SeqNum = std::pair<uint32_t, uint16_t>; // frame_no, frag_no
-
-    private:
-      std::map<SeqNum, Packet> unacked_ {};
-      std::multimap<uint32_t, uint32_t> acked_bytes_ {};  // acked bytes in the last window
-
-      uint32_t estimate_rate_byteps_ {100 * 125}; // default 100kbps
-      uint32_t last_update_ms_ {0};
-    public:
-      void on_packet_sent(uint32_t timestamp_ms, const Packet & pkt);
-      void on_ack_received(uint32_t timestamp_ms, const AckPacket & pkt);
-
-      uint32_t get_rate_estimation() const { return estimate_rate_byteps_; }
-  };
 
   /**
    * calculate the delay related values: d_send, d_recv, d_size for each frame
@@ -364,6 +388,184 @@ public:
   void set_initial_rate_estimation(uint32_t rate_byteps) { aimd_.set_rate_estimation(rate_byteps); }
 
   ~GCCMinus() = default;
+};
+
+
+/**
+ * simplified BBR congestion control
+ * BtlBw is estimated by RateEstimator, RTprop is estimated by the RTT
+ */
+class BBRMinus : public CongestionControlInterface
+{
+  /**
+   * BBR pesudo code
+   * OnPktSend():
+   *   update bytes_inflight_ and unacked_ and in_retrans_
+   *   rate_est_.OnPktSend()
+   *   loss_est_.OnPktSend()
+   *
+   * OnAckRecv():
+   *   rate_est_.onAckRecv()
+   *   loss_est_.onAckRecv()
+   *
+   *   update bytes_inflight_ and unacked_
+   *   find the RTT and update rtprop_ 
+   *
+   *   if now_ms > machine_.next_update
+   *     update state machine // also updates the pacing gain
+   *   
+   *   update pacing rate based on the pacing gain
+   */
+private:
+  enum BBRState {START = 0, DRAIN, PROBE_BW, PROBE_RTT};
+
+  struct InternalState
+  {
+    BBRState state;
+    uint32_t next_update_ms;
+  };
+
+  template<typename Cmp> class Filter
+  {
+    private:
+      std::map<uint32_t, uint32_t, Cmp> values_ {}; // <value, time_ms>
+      bool inited_ {false};
+
+      uint32_t window_ms_ {0};
+      uint32_t default_value_ {0};
+
+      uint32_t latest_value_ {0};
+      uint32_t latest_update_ms_ {0};
+
+    public:
+      Filter(uint32_t default_value, uint32_t window_ms) 
+        : window_ms_(window_ms), default_value_(default_value) {}
+
+      /* updater */
+      void update(uint32_t value, uint32_t timestamp_ms) 
+      {
+        inited_ = true;
+        values_.insert({value, timestamp_ms}); // if value already exists, it will overwrite the time
+
+        latest_value_ = value;
+        latest_update_ms_ = timestamp_ms;
+
+        /* remove the outdated entries */
+        for(auto it = values_.begin(); it != values_.end();) {
+          if (it->second + window_ms_ < timestamp_ms) { // outdated!
+            it = values_.erase(it);
+          } else {
+            ++it;
+          }
+        }
+      };
+
+      void set_window(uint32_t window_ms) { window_ms_ = window_ms; }
+
+      /* getters */
+      uint32_t get() const
+      {
+        if (not inited_) return default_value_;
+        if (values_.empty()) return latest_value_; // all the values are expired, return the last updated one
+        return values_.begin()->first;
+      }
+
+      uint32_t last_update_ms() const 
+      {
+        if (not inited_) return 0;
+        if (values_.empty()) return latest_update_ms_; // all the values are expired, return the last update time
+        return values_.begin()->second;
+      }
+
+      bool initialized() const { return inited_; }
+
+      friend class BBRMinus;
+  };
+
+  using BtlbwFilter = Filter<std::greater<uint32_t>>;
+  using RTpropFilter = Filter<std::less<uint32_t>>;
+  using SeqNum = std::pair<uint32_t, uint16_t>; // frame_no, frag_no
+
+private:
+  constexpr static double PACING_GAIN_STARTUP = 1.5;   // pacing gain at startup
+  constexpr static double PACING_GAIN_DRAIN = 0.5;     // pacing gain at startup
+  constexpr static double PACING_GAIN_PROBERTT = 0.3;  // pacing gain at probe_rtt
+  constexpr static uint32_t STARTUP_TO_DRAIN_MS = 400; // the threshold of Btlbw not change to enter DRAIN state
+  constexpr static uint32_t PROBERTT_ENTER_MS = 4900; // the threshold to enter PROBE_RTT (rtprop not change)
+
+  constexpr static int PACING_GAIN_LIST_LEN = 6;
+  static double PACING_GAIN_LIST[PACING_GAIN_LIST_LEN];
+private:
+  /* bottleneck bandwidth */
+  RateEstimator rate_est_ {};
+  LossCalculator loss_calc_ {};
+  BtlbwFilter btlbw_ {0, 1000};   // default = 0, timeout = 10s
+
+  /* RTprop */
+  RTpropFilter rtprop_ {0x5f5f5f5f, 5000}; // default = larget value, timeout = 10s
+
+  /* bytes in flight and retrans set */
+  struct PktInfo 
+  {
+    uint32_t size_in_bytes;
+    uint32_t timestamp_ms;
+  };
+  std::map<SeqNum, PktInfo> unacked_ {}; // key: seq, value: packet size
+  std::map<SeqNum, PktInfo> in_retrans_ {};
+
+  /* state machine */
+  InternalState machine_ {};
+
+  /* pacing gain */
+  double pacing_gain_ {1};
+
+  /* other helper values */
+  int drain_round_count_ {0};
+  int probebw_round_count_ {0};
+  uint32_t probertt_start_ {0};
+  uint32_t last_clear_ms_ {0};
+  uint32_t last_bw_est_ {0};
+  std::shared_ptr<CCStatsRecorder> stats_{};
+
+private:
+  /* state machine related functions */
+  void update_machine(uint32_t timestamp_ms);
+
+  /* entering a new state */
+  void enter_startup(uint32_t timestamp_ms);
+  void enter_drain(uint32_t timestamp_ms);
+  void enter_probebw(uint32_t timestamp_ms);
+  void enter_probertt(uint32_t timestamp_ms);
+
+  /* exit from a state */
+  void exit_startup(uint32_t timestamp_ms);
+  void exit_drain(uint32_t timestamp_ms);
+  void exit_probebw(uint32_t timestamp_ms);
+  void exit_probertt(uint32_t timestamp_ms);
+
+  /* normal update for each state */
+  void execute_startup(uint32_t timestamp_ms);
+  void execute_drain(uint32_t timestamp_ms);
+  void execute_probebw(uint32_t timestamp_ms);
+  void execute_probertt(uint32_t timestamp_ms);
+
+  /* post the updates to the observers */
+  void post_updates();
+
+  /* clear expired data in unacked_ and in_retrans_ */
+  void clear_expired_packets(uint32_t timestamp_ms);
+
+  /* debug */
+  std::ostream & get_logger(uint32_t timestamp_ms);
+public:
+  BBRMinus();
+
+  // main interface
+  virtual void on_packet_sent(uint32_t timestamp_ms, const Packet &p) override;
+  virtual void on_ack_received(uint32_t timestamp_ms, const AckPacket &p) override;
+
+  void set_initial_rate_estimation(uint32_t rate_byteps) 
+  { btlbw_.default_value_ = rate_byteps; btlbw_.latest_value_ = rate_byteps; }
 };
 
 #endif

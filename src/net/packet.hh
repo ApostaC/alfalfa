@@ -61,6 +61,7 @@ private:
   uint16_t red_fragments_in_this_frame_; // 0 --> 0, 255 --> 100%
   uint16_t control_signal_;
 
+  bool is_retrans_ {false}; // only used by the sender! receiver never use this field
   std::string payload_;
 
 public:
@@ -73,6 +74,7 @@ public:
   /* setters */
   void set_send_timestamp_ms(uint32_t send_timestamp_ms) { send_timestamp_ms_ = send_timestamp_ms; }
   void set_stop() { control_signal_ = STOP; }
+  void set_retrans() { is_retrans_ = true; }
 
   /* getters */
   bool valid() const { return valid_; }
@@ -86,6 +88,7 @@ public:
   uint32_t send_timestamp_ms() const { return send_timestamp_ms_; }
   const std::string & payload() const { return payload_; }
   uint16_t control_signal() const { return control_signal_; }
+  bool is_retrans() const { return is_retrans_; }
 
   /* for non-salsify encoders, reuse source_state and target_state as key-frame identifier */
   void set_key_frame() { source_state_ = 0u; target_state_ = ~0u; }

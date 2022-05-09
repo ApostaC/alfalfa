@@ -83,14 +83,17 @@ public:
   /* receive datagram, timestamp, and where it came from */
   received_datagram recv( void );
 
-  /* send datagram to specified address */
-  void sendto( const Address & peer, const std::string & payload );
+  /* send datagram to specified address, return false to indicate blocking status */
+  bool sendto( const Address & peer, const std::string & payload );
 
-  /* send datagram to connected address */
-  void send( const std::string & payload );
+  /* send datagram to connected address, return false to indicate blocking status */
+  bool send( const std::string & payload );
 
   /* turn on timestamps on receipt */
   void set_timestamps( void );
+
+  /* send nothing but register write */
+  void pass( void ) { register_write(); }
 };
 
 #endif /* SOCKET_HH */

@@ -145,11 +145,12 @@ TransSender::TransSender(const Address & peer_addr, uint32_t fps,
                          CongestionControlInterface & cc,
                          EncoderInterface & encoder, 
                          RTXInterface & rtx_mgr)
-  : cc_(cc), encoder_(encoder), rtx_mgr_(rtx_mgr)
+  : cc_(cc), encoder_(encoder), rtx_mgr_(rtx_mgr), fps_(fps)
 {
   // initialize socket
   socket_.connect(peer_addr);
   socket_.set_timestamps();
+  socket_.set_blocking(false); // non-block
 
   // use fps to initialize the timerfd
   uint32_t BILLION = 1000 * 1000 * 1000;
@@ -167,10 +168,28 @@ TransSender::TransSender(const Address & peer_addr, uint32_t fps,
             cerr << "Warning: skip " << exp - 1 << " frames! " << std::endl;
           }
 
-          uint32_t now_ms = timestamp_ms();
+          /* estimate rtx rate based on rtx queue length */
+          auto rtx_rate = 0;
+          for (auto & p : this->rtx_queue_) {
+            rtx_rate += (p.payload().length() + 40) * this->fps_;
+          }
+          rtx_rate += this->cached_target_rate_ * this->cached_loss_rate_;
+
+          /* set target bitrate */
+          int tgt_rate = this->cached_target_rate_ - rtx_rate;
+          tgt_rate = max(0, tgt_rate);
+          encoder_.set_target_bitrate(tgt_rate);
+
+          /* encode */
           // TODO: change the frame's interval here (need to matain last_encoded_frame_timestamp_ms_)
+          uint32_t now_ms = timestamp_ms();
+          cerr << "[" << now_ms << "] estimated rtx rate " << rtx_rate 
+               << ", cached pacing rate is " << this->cached_pacing_rate_
+               << ", cached target rate is " << this->cached_target_rate_
+               << ", cached loss rate is " << this->cached_loss_rate_
+               << ", target bitrate = " << tgt_rate << endl;
+
           auto frame = this->encoder_.encode_next_frame(now_ms);
-          //auto old_queue_length = data_queue_.size();
           if (frame.initialized())
           {
             auto packets = frame.get().packets();
@@ -180,10 +199,8 @@ TransSender::TransSender(const Address & peer_addr, uint32_t fps,
           }
 
           this->pacer_.set_pacing_rate(this->cached_pacing_rate_);
-          cerr << "[" << now_ms << "] Queue length is " << data_queue_.size() 
-               << " cached pacing rate is " << this->cached_pacing_rate_ << endl;
-               //<< "   old queue len = " << old_queue_length << endl
-               //<< "   rtx queue len = " << rtx_queue_.size() << endl;
+          cerr << "[" << now_ms << "] Queue length is " << this->data_queue_.size() 
+               << ", nic queue length is " << this->mock_nic_.size() << endl;
           return ResultType::Continue;
         }));
 
@@ -192,15 +209,22 @@ TransSender::TransSender(const Address & peer_addr, uint32_t fps,
         [this]() -> Result
         {
           auto now_ms = timestamp_ms();
-          while(this->pacer_.ready_to_send(now_ms) and this->has_data_to_send()) {
-            this->send_one_packet(now_ms);
+          //while(this->pacer_.ready_to_send(now_ms) and this->nic_has_data_to_send()) {
+          int burst_size = 0;
+          while(this->nic_has_data_to_send() and burst_size < 3) {
+            auto is_ok = this->real_send_packet(now_ms);
+            if (not is_ok) {
+              break;
+            }
             now_ms = timestamp_ms();
+            burst_size++;
           }
-
+          this->socket_.pass();
           return ResultType::Continue;
         }, 
-        [this]() {return this->pacer_.ready_to_send(timestamp_ms()) and this->has_data_to_send();}));
-        //[this]() {return this->has_data_to_send() and this->pacer_.ready_to_send(timestamp_ms());}));
+        [this]() { return this->nic_has_data_to_send(); }));
+        //[this]() {return this->pacer_.ready_to_send(timestamp_ms()) and this->nic_has_data_to_send();}));
+        //[this]() {return this->nic_has_data_to_send() and this->pacer_.ready_to_send(timestamp_ms());}));
 
   // receive the acks
   poller_.add_action(Poller::Action(socket_, Direction::In,
@@ -217,15 +241,31 @@ TransSender::TransSender(const Address & peer_addr, uint32_t fps,
         }));
 }
 
-void TransSender::send_one_packet(uint32_t now_ms)
+bool TransSender::real_send_packet(uint32_t now_ms)
+{
+  if (not mock_nic_.empty()) {
+    auto & packet = mock_nic_.front();
+    auto ret = socket_.send(packet.to_string());
+    (void)now_ms;
+    //cerr << "[HERE]: send packet " <<  packet.frame_no() << "," << packet.fragment_no() 
+    //     << " from " << now_ms << " to " << timestamp_ms() << endl;
+    mock_nic_.pop_front();
+    return ret;
+  }
+  return false;
+}
+
+void TransSender::mock_send_packet(uint32_t now_ms)
 {
   // check RTX queue
   if (not this->rtx_queue_.empty()) {
     auto & packet = this->rtx_queue_.front();
     packet.set_send_timestamp_ms(now_ms);
+    packet.set_retrans();
     auto str = packet.to_string();
+    this->mock_nic_.push_back(packet);
     this->pacer_.on_packet_sent(now_ms, str.length());
-    this->socket_.send(str);
+    //this->socket_.send(str);
     this->cc_.on_packet_sent(now_ms, packet);
     this->rtx_mgr_.on_rtx_sent(now_ms, packet);
     cerr << "[" << now_ms << "] retrainsmitted packet " << packet.frame_no() << "," << packet.fragment_no() << endl;
@@ -238,8 +278,9 @@ void TransSender::send_one_packet(uint32_t now_ms)
     auto & packet = this->data_queue_.front();
     packet.set_send_timestamp_ms(now_ms);
     auto str = packet.to_string();
+    this->mock_nic_.push_back(packet);
     this->pacer_.on_packet_sent(now_ms, str.length());
-    this->socket_.send(str);
+    //this->socket_.send(str);
     this->cc_.on_packet_sent(now_ms, packet);
     this->rtx_mgr_.on_packet_sent(now_ms, packet);
     this->data_queue_.pop_front();
@@ -265,14 +306,26 @@ void TransSender::start(uint32_t time_limit_ms)
   uint32_t start_ms = timestamp_ms();
   pacer_.start_pacer(start_ms);
   while (true) {
-    uint32_t ttw = min(pacer_.ms_until_nextcheck(), 1u);
+    /* check the nic queue */
+    uint32_t ttw = max(pacer_.ms_until_nextcheck(), 1u);
     const auto poll_result = poller_.poll(ttw);
+
+    /* try to put more packet from data/rtx queue to nic queue */
+    auto now_ms = timestamp_ms();
+    while (pacer_.ready_to_send(now_ms) and app_has_data_to_send() ) {
+      mock_send_packet(now_ms);
+    }
+
     if (poll_result.result == Poller::Result::Type::Exit) {
       if (poll_result.exit_status) {
         cerr << "Connection error in TransSender::start() (main loop)" << endl;
       }
       throw std::runtime_error("TransSender got a unhandled error in the main loop!");
     }
+
+    //if (poll_result.result == Poller::Result::Type::Timeout) {
+    //  cerr << "At: " << timestamp_ms() << " poller timeouts!" << endl;
+    //}
 
     if(time_limit_ms > 0 and timestamp_ms() > start_ms + time_limit_ms) {
       cerr << "Time limit reached! stop..." << endl;
@@ -292,16 +345,13 @@ void TransSender::start(uint32_t time_limit_ms)
 void TransSender::post_updates(uint32_t sending_rate_byteps, uint32_t target_bitrate_byteps, double loss_rate)
 {
   cached_pacing_rate_ = sending_rate_byteps;
+  cached_target_rate_ = target_bitrate_byteps;
+  cached_loss_rate_ = loss_rate;
   //pacer_.set_pacing_rate(sending_rate_byteps);
   // NOTE: if we use pacer.set_pacing_rate here, it will cause the real pacing rate 
   //       of a frame does not match the expected pacing rate when encoding the frame
   // TODO: use loss rate here
   
-  auto now_ms = timestamp_ms();
-  auto rtx_rate = rtx_mgr_.get_rtx_bitrate_byteps(now_ms);
-  int tgt_rate = target_bitrate_byteps - rtx_rate;
-  tgt_rate = max(0, tgt_rate);
-  encoder_.set_target_bitrate(tgt_rate);
   encoder_.set_loss_rate(loss_rate);
 }
 
@@ -323,6 +373,8 @@ TransReceiver::TransReceiver(const uint16_t port, DecoderInterface & decoder)
 
         auto now_ms = timestamp_ms();
         auto delay = now_ms - packet.send_timestamp_ms();
+
+        //cerr << "[" << now_ms<< "] received data packet " << packet.frame_no() << "," << packet.fragment_no() << endl;
         
         this->decoder_.incoming_packet(now_ms, packet);
         AckPacket ack(packet.connection_id(), packet.frame_no(), packet.fragment_no(), 

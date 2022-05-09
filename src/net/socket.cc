@@ -178,37 +178,53 @@ UDPSocket::received_datagram UDPSocket::recv( void )
 }
 
 /* send datagram to specified address */
-void UDPSocket::sendto( const Address & destination, const string & payload )
+bool UDPSocket::sendto( const Address & destination, const string & payload )
 {
   const ssize_t bytes_sent =
-    SystemCall( "sendto", ::sendto( fd_num(),
+    //SystemCall( "sendto", ::sendto( fd_num(),
+        ::sendto(fd_num(),
 				    payload.data(),
 				    payload.size(),
 				    0,
 				    &destination.to_sockaddr(),
-				    destination.size() ) );
+				    destination.size() );
+
+  /* deal with non-blocking IO */
+  if ( bytes_sent == -1 and errno == EWOULDBLOCK) {
+    register_write();
+    return false;
+  }
 
   if ( size_t( bytes_sent ) != payload.size() ) {
     throw runtime_error( "datagram payload too big for sendto()" );
   }
 
   register_write();
+  return true;
 }
 
 /* send datagram to connected address */
-void UDPSocket::send( const string & payload )
+bool UDPSocket::send( const string & payload )
 {
   const ssize_t bytes_sent =
-    SystemCall( "send", ::send( fd_num(),
+    //SystemCall( "send", ::send( fd_num(),
+    ::send(fd_num(),
 				payload.data(),
 				payload.size(),
-				0 ) );
+				0 );
+
+  /* deal with non-blocking IO */
+  if ( bytes_sent == -1 and errno == EWOULDBLOCK) {
+    register_write();
+    return false;
+  }
 
   if ( size_t( bytes_sent ) != payload.size() ) {
     throw runtime_error( "datagram payload too big for send()" );
   }
 
   register_write();
+  return true;
 }
 
 /* set socket option */

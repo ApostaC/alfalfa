@@ -87,16 +87,21 @@ public:
   // set pacing rate
   void set_pacing_rate(uint32_t rate_byteps);
 
+  // get pacing rate
+  uint32_t pacing_rate() const { return pacing_rate_byteps_; }
+
   // called when sending out a packet 
   void on_packet_sent(uint32_t timestamp_ms, size_t pkt_size);
 
   // how long should we wait until ready
   uint32_t ms_until_nextcheck() const 
   { 
+    if (budget_ >= 0) return 0;
+    // budget is negative 
     if (pacing_rate_byteps_ > 0) {
-      return std::min(budget_ * 1000 / pacing_rate_byteps_, 10u);
+      return std::min((-budget_) * 1000 / pacing_rate_byteps_, 10u);
     }
-    return 10;
+    return 10; // pacing rate == 0 and budget is negative
   }
 
   // query if it's ready to send
@@ -122,13 +127,26 @@ private:
   RTXInterface & rtx_mgr_;
 
   uint32_t cached_pacing_rate_ {INITIAL_PACING_RATE};
+  uint32_t cached_target_rate_ {INITIAL_PACING_RATE};
+  double cached_loss_rate_ {0};
+  uint16_t fps_ {};
 
   std::deque<Packet> data_queue_{};
   std::deque<Packet> rtx_queue_{};
 
+  std::deque<Packet> mock_nic_{};
+
 private:
-  bool has_data_to_send() const { return not (data_queue_.empty() and rtx_queue_.empty()); }
-  void send_one_packet(uint32_t now_ms);
+  /* called when checking poller, so need to check real queue */
+  bool nic_has_data_to_send() const { return not mock_nic_.empty(); }
+  bool app_has_data_to_send() const { return not (data_queue_.empty() and rtx_queue_.empty()); }
+
+  /* called when UDP socket is available */
+  bool real_send_packet(uint32_t now_ms);
+
+  /* trigger CC and move packet into mock_nic_ */
+  void mock_send_packet(uint32_t now_ms);
+
   void send_stop_message();
 
 public:

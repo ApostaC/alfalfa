@@ -78,7 +78,8 @@ int main(int argc, char *argv[])
   //encoder.set_fec_rate(255u * fec_rate);
 
   //SalsifyCongestionControl cc(100, fps);
-  GCCMinus cc;
+  //GCCMinus cc;
+  BBRMinus cc;
   cc.set_initial_rate_estimation(bw_ctrl.init_bandwidth_byteps() * 0.6);
   OracleCongestionControl & orac_cc = bw_ctrl.get_oracle_cc();
 

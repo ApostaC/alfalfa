@@ -51,7 +51,7 @@ private:
     CCOperation(uint32_t tgt_bw_byteps, double l, BandwidthController *p)
       : target_bw_byteps(tgt_bw_byteps), loss(l), ptr(p) {}
 
-    void operator()() { ptr->oracle_cc_.set_bw(target_bw_byteps); ptr->oracle_cc_.set_loss(loss); }
+    void operator()() { ptr->oracle_cc_.set_bw(target_bw_byteps); ptr->oracle_cc_.set_loss(loss/100.); }
   };
 
   struct Event

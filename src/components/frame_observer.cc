@@ -1,3 +1,4 @@
+#include <iostream>
 #include "frame_observer.hh"
 
 using namespace std;
@@ -22,6 +23,7 @@ void CompleteFrameObserver::new_complete_frame(uint32_t timestamp_ms, const Frag
   if (frames_.count(frame.frame_no()) == 0) {
     FrameInfo info{frame.frame_no(), timestamp_ms, (uint32_t)frame.frame().length()};
     frames_[frame.frame_no()] = info;
+    cerr << "[" << timestamp_ms << "] received frame " << frame.frame_no() << endl;
   }
   else {
     throw runtime_error("CompleteFrameObserver: adding a duplicate frame whose id = " + to_string(frame.frame_no()));

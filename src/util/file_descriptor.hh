@@ -35,6 +35,7 @@
 #include <algorithm>
 #include <cstdio>
 #include <cassert>
+#include <fcntl.h>
 
 #include "exception.hh"
 #include "chunk.hh"
@@ -64,6 +65,24 @@ public:
     if ( fd_ >= 0 ) {
       SystemCall( "close", close( fd_ ) );
     }
+  }
+
+  void set_blocking(const bool blocking) 
+  {
+    int flags = SystemCall("fcntl: F_GETFL", fcntl(fd_, F_GETFL));
+    if (blocking) {
+      flags &= ~O_NONBLOCK;
+    } else {
+      flags |= O_NONBLOCK;
+    }
+
+    SystemCall("fcntl: F_SETFL", fcntl(fd_, F_SETFL, flags));
+  }
+  
+  bool get_blocking() const 
+  {
+    int flags = SystemCall("fcntl: F_GETFL", fcntl(fd_, F_GETFL));
+    return !(flags & O_NONBLOCK);
   }
 
   uint64_t size( void ) const

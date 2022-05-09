@@ -30,6 +30,7 @@
 #include <numeric>
 #include "poller.hh"
 #include "exception.hh"
+#include "timestamp.hh"
 
 using namespace std;
 using namespace PollerShortNames;
@@ -68,9 +69,11 @@ Poller::Result Poller::poll( const int & timeout_ms )
         return Result::Type::Exit;
     }
 
+    //auto in_ms = timestamp_ms();
     if ( 0 == SystemCall( "poll", ::poll( &pollfds_[ 0 ], pollfds_.size(), timeout_ms ) ) ) {
         return Result::Type::Timeout;
     }
+    //auto time_ms = timestamp_ms();
 
     for ( unsigned int i = 0; i < pollfds_.size(); i++ ) {
         if ( pollfds_[ i ].revents & (POLLERR | POLLHUP | POLLNVAL) ) {
@@ -80,6 +83,7 @@ Poller::Result Poller::poll( const int & timeout_ms )
         if ( pollfds_[ i ].revents & pollfds_[ i ].events ) {
             /* we only want to call callback if revents includes
                the event we asked for */
+            //cerr << "HERE: poll fd " << i << " is ready! from " << in_ms << " to " << time_ms << endl;
             const auto count_before = actions_.at( i ).service_count();
             auto result = actions_.at( i ).callback();
 

@@ -3,6 +3,8 @@
 
 using namespace std;
 
+double BBRMinus::PACING_GAIN_LIST[BBRMinus::PACING_GAIN_LIST_LEN] = {1.33, 0.75, 1, 1, 1, 1};
+
 void CCStatsRecorder::trigger_log(uint32_t timestamp_ms)
 {
   if (timestamp_ms- last_log_ms_ > log_period_) {
@@ -285,13 +287,13 @@ void SalsifyCongestionControl::on_ack_received(uint32_t timestamp_ms, const AckP
 }
 
 /* FOR GCC */
-void GCCMinus::RateEstimator::on_packet_sent(uint32_t, const Packet & pkt)
+void RateEstimator::on_packet_sent(uint32_t, const Packet & pkt)
 {
   SeqNum seq{pkt.frame_no(), pkt.fragment_no()};
   unacked_.insert({seq, pkt});
 }
 
-void GCCMinus::RateEstimator::on_ack_received(uint32_t timestamp_ms, const AckPacket & ack)
+void RateEstimator::on_ack_received(uint32_t timestamp_ms, const AckPacket & ack)
 {
   SeqNum seq{ack.frame_no(), ack.fragment_no()};
   auto it = unacked_.find(seq);
@@ -656,4 +658,331 @@ void GCCMinus::on_ack_received(uint32_t timestamp_ms, const AckPacket & ack)
 
   internal_update(timestamp_ms);
   post_updates(timestamp_ms);
+}
+
+/* FOR BBR */
+BBRMinus::BBRMinus()
+{
+  /* init the state machine */
+  machine_.state = START;
+  machine_.next_update_ms = 0;
+
+  /* stats */
+  stats_ = make_shared<CCStatsRecorder>();
+  add_observer(stats_);
+}
+
+void BBRMinus::post_updates()
+{
+  uint32_t rate = btlbw_.get() * pacing_gain_;
+  //get_logger(0) << "Post update: btlbw = " << btlbw_.get() << ", pacing gain = " << pacing_gain_ << ", rate = " << rate << endl;
+  auto loss = loss_calc_.get_loss_rate();
+  for(auto obs : observers_) {
+    obs->post_updates(rate, rate * 0.9, loss);
+  }
+}
+
+std::ostream & BBRMinus::get_logger(uint32_t timestamp_ms)
+{ 
+  cerr << "[BBR: " << timestamp_ms << "]: "; 
+  return cerr; 
+}
+
+void BBRMinus::update_machine(uint32_t timestamp_ms)
+{
+  /* if it's just initialized */
+  if (machine_.next_update_ms == 0) {
+    machine_.state = START;
+    machine_.next_update_ms = timestamp_ms;
+    enter_startup(timestamp_ms);
+  }
+
+  if (machine_.next_update_ms > timestamp_ms) {
+    return;
+  }
+
+  switch (machine_.state) {
+    case START:
+      execute_startup(timestamp_ms);
+      break;
+    
+    case DRAIN:
+      execute_drain(timestamp_ms);
+      break;
+
+    case PROBE_BW:
+      execute_probebw(timestamp_ms);
+      break;
+
+    case PROBE_RTT:
+      execute_probertt(timestamp_ms);
+      break;
+
+    default:
+      throw runtime_error("BBRMinus: unknown machine state");
+  };
+}
+
+void BBRMinus::enter_startup(uint32_t timestamp_ms)
+{
+  /**
+   * start-up state:
+   *   pacing gain = 1.5
+   *   normal update: min(rtprop_, 100ms);
+   *
+   *   if btlbw_ is not updated for 400 ms, go to DRAIN
+   *   if rtprop_ is not updated for 10s, goto probertt
+   */
+  pacing_gain_ = PACING_GAIN_STARTUP;
+
+  /* normal processing */
+  machine_.state = START; 
+  machine_.next_update_ms = min(rtprop_.get(), 100u) + timestamp_ms;
+
+  get_logger(timestamp_ms) << "enter startup! next update is " << machine_.next_update_ms << endl;
+}
+
+void BBRMinus::execute_startup(uint32_t timestamp_ms)
+{
+  /* if btlbw is not chaing, enter DRAIN */
+  if (static_cast<int32_t>(timestamp_ms - btlbw_.last_update_ms()) > 
+      static_cast<int32_t>(STARTUP_TO_DRAIN_MS) and btlbw_.initialized()) {
+    exit_startup(timestamp_ms);
+    enter_drain(timestamp_ms);
+    return;
+  }
+
+  /* if rtprop is not changing, enter PROBE_RTT */
+  if (static_cast<int32_t>(timestamp_ms - rtprop_.last_update_ms()) > 
+      static_cast<int32_t>(PROBERTT_ENTER_MS) and rtprop_.initialized()) {
+    exit_startup(timestamp_ms);
+    enter_probertt(timestamp_ms);
+    return;
+  }
+  
+  /* normal processing */
+  pacing_gain_ = PACING_GAIN_STARTUP;
+  machine_.next_update_ms = min(rtprop_.get(), 100u) + timestamp_ms;
+  get_logger(timestamp_ms) << "execute startup! next update is " << machine_.next_update_ms << endl;
+}
+
+void BBRMinus::exit_startup(uint32_t)
+{
+  /* nothing to do */
+}
+
+void BBRMinus::enter_drain(uint32_t timestamp_ms)
+{
+  /**
+   * drain state:
+   *  pacing gain = 0.3
+   *  normal update: min(rtprop_, 100ms)
+   *
+   *  if bytes in flight is smaller than bdp, enter PROBE_BW
+   */
+  pacing_gain_ = PACING_GAIN_DRAIN;
+  machine_.next_update_ms = min(rtprop_.get(), 100u) + timestamp_ms;
+  machine_.state = DRAIN;
+
+  drain_round_count_ = 0;
+  get_logger(timestamp_ms) << "enter drain!" << endl;
+}
+
+void BBRMinus::execute_drain(uint32_t timestamp_ms)
+{
+  uint32_t in_flight = 0;
+  for (auto & ent : unacked_) {
+    in_flight += ent.second.size_in_bytes;
+  }
+  
+  auto bdp = btlbw_.get() * rtprop_.get() / 1000;
+  if (in_flight <= bdp or drain_round_count_ >= 8) {
+    exit_drain(timestamp_ms);
+    enter_probebw(timestamp_ms);
+    return;
+  }
+
+  machine_.next_update_ms = min(rtprop_.get(), 100u) + timestamp_ms;
+  drain_round_count_ ++;
+  get_logger(timestamp_ms) << "execute drain! bdp = " << bdp << ", inflight = " << in_flight << endl;
+}
+
+void BBRMinus::exit_drain(uint32_t)
+{
+  drain_round_count_ = 0;
+}
+
+void BBRMinus::enter_probebw(uint32_t timestamp_ms)
+{
+  /**
+   * probe_bw state:
+   *   pacing gain = gain_list[round % N]
+   *   normal update: min(rtprop_, 150ms)
+   *
+   *   if rtprop_ is not updated for 10s, goto probertt
+   */
+
+  probebw_round_count_ = 0;
+  pacing_gain_ = PACING_GAIN_LIST[0];
+
+  machine_.next_update_ms = min(rtprop_.get(), 150u) + timestamp_ms;
+  machine_.state = PROBE_BW;
+  get_logger(timestamp_ms) << "enter probe_bw!" << endl;
+}
+
+void BBRMinus::execute_probebw(uint32_t timestamp_ms) 
+{
+  /* if rtprop is not changing, enter PROBE_RTT */
+  if (static_cast<int32_t>(timestamp_ms - rtprop_.last_update_ms()) > 
+      static_cast<int32_t>(PROBERTT_ENTER_MS) and rtprop_.initialized()) {
+    exit_startup(timestamp_ms);
+    enter_probertt(timestamp_ms);
+    return;
+  }
+
+  probebw_round_count_ ++;
+  pacing_gain_ = PACING_GAIN_LIST[probebw_round_count_ % PACING_GAIN_LIST_LEN];
+  machine_.next_update_ms = min(rtprop_.get(), 150u) + timestamp_ms;
+}
+
+void BBRMinus::exit_probebw(uint32_t)
+{
+  probebw_round_count_ = 0;
+}
+
+void BBRMinus::enter_probertt(uint32_t timestamp_ms)
+{
+  /**
+   * probe_rtt state:
+   *   pacing gain = 0.3
+   *   normal update: max(rtt, 150) // after this update, it will enter another state
+   *
+   *   if bytes in flight is not full, goto start
+   *   if bytes in flight is full, goto probebw
+   */
+  pacing_gain_ = PACING_GAIN_PROBERTT;
+  probertt_start_ = timestamp_ms;
+
+  machine_.next_update_ms = max(rtprop_.get(), 150u) + timestamp_ms;
+  machine_.state = PROBE_RTT;
+  get_logger(timestamp_ms) << "enter probe_rtt!" << endl;
+}
+
+void BBRMinus::execute_probertt(uint32_t timestamp_ms)
+{
+  uint32_t in_flight = 0;
+  auto bdp = btlbw_.get() * rtprop_.get() / 1000;
+  for (auto & ent : unacked_) {
+    in_flight += ent.second.size_in_bytes;
+  }
+  
+  if (in_flight <= bdp) {
+    exit_probertt(timestamp_ms);
+    enter_probebw(timestamp_ms);
+    return;
+  }
+  else {
+    exit_probertt(timestamp_ms);
+    enter_probebw(timestamp_ms);
+    return;
+  }
+}
+
+void BBRMinus::exit_probertt(uint32_t)
+{
+  /* do nothing here */
+}
+
+void BBRMinus::clear_expired_packets(uint32_t timestamp_ms) 
+{
+  if (last_clear_ms_ == 0) {
+    last_clear_ms_ = timestamp_ms;
+    return;
+  }
+
+  /* execute clear every 1 sec */
+  if (not timestamp_ms - last_clear_ms_ > 1000) {
+    return;
+  }
+
+  /* clear the all the packet information before last clear */
+  for (auto it = unacked_.begin(); it != unacked_.end();) {
+    if (it->second.timestamp_ms < last_clear_ms_) {
+      it = unacked_.erase(it);
+    } else {
+      ++it;
+    }
+  }
+
+  for (auto it = in_retrans_.begin(); it != in_retrans_.end();) {
+    if (it->second.timestamp_ms < last_clear_ms_) {
+      it = in_retrans_.erase(it);
+    } else {
+      ++it;
+    }
+  }
+
+  last_clear_ms_ = timestamp_ms;
+}
+
+void BBRMinus::on_packet_sent(uint32_t timestamp_ms, const Packet &p)
+{
+  stats_->on_packet_sent(timestamp_ms, p);
+
+  /* update unacked and in_retrans */
+  SeqNum seq{p.frame_no(), p.fragment_no()};
+  PktInfo pi;
+  pi.size_in_bytes = p.to_string().length();
+  pi.timestamp_ms = timestamp_ms;
+  unacked_.insert({seq, pi});
+  if (p.is_retrans()) {
+    in_retrans_.insert({seq, pi});
+  }
+  
+  /* update loss and rate estimator */
+  rate_est_.on_packet_sent(timestamp_ms, p);
+  loss_calc_.on_packet_sent(timestamp_ms, p);
+
+  update_machine(timestamp_ms);
+  clear_expired_packets(timestamp_ms);
+  post_updates();
+}
+
+void BBRMinus::on_ack_received(uint32_t timestamp_ms, const AckPacket &p)
+{
+  stats_->on_ack_received(timestamp_ms, p);
+  rate_est_.on_ack_received(timestamp_ms, p);
+  loss_calc_.on_ack_received(timestamp_ms, p);
+
+  /* update rtt and unacked */
+  SeqNum seq{p.frame_no(), p.fragment_no()};
+  auto ack_it = unacked_.find(seq);
+
+  if (ack_it != unacked_.end()) {
+    if (in_retrans_.count(seq) == 0) {
+      /* only update RTT for non-retrans packets */
+      auto rtt = timestamp_ms - p.send_time_ms();
+      rtprop_.update(rtt, timestamp_ms);
+      cerr << "HERE RTT = " << rtt << endl;
+    }
+
+    /* remove from unacked */
+    unacked_.erase(ack_it);
+  }
+
+  /* update btlbw every 50 ms */
+  if (last_bw_est_ == 0) {
+    last_bw_est_ = timestamp_ms;
+  }
+  if (timestamp_ms - last_bw_est_ > 50) {
+    btlbw_.set_window(10 * rtprop_.get());
+    btlbw_.update(rate_est_.get_rate_estimation(), timestamp_ms);
+    get_logger(timestamp_ms) << "Update btlbw with value: " << rate_est_.get_rate_estimation() 
+                             << ", now btlbw is " << btlbw_.get() 
+                             << ", rtprop is " << rtprop_.get() << endl;
+  }
+  
+  update_machine(timestamp_ms);
+  clear_expired_packets(timestamp_ms);
+  post_updates();
 }
