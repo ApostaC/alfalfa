@@ -62,6 +62,23 @@ public:
 };
 
 /**
+ * RTX manager for SVC
+ * Only retransmits for baselayer
+ */
+class SVCRTXManager : public RTXInterface
+{
+private:
+  RTXManager mgr{};
+
+public:
+  SVCRTXManager() = default;
+  virtual void on_packet_sent(uint32_t timestamp_ms, const Packet & pkt) override;
+  virtual void on_ack_received(uint32_t timestamp_ms, const AckPacket & ack, std::deque<Packet> & tgt_buf) override;
+  virtual void on_rtx_sent(uint32_t timestamp_ms, const Packet & pkt) override;
+  virtual uint32_t get_rtx_bitrate_byteps(uint32_t timestamp_ms) override; 
+};
+
+/**
  * The pacer with different prioirty queues
  */
 class BudgetPacer

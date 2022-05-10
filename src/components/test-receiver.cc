@@ -49,13 +49,15 @@ int main(int argc, char *argv[])
   output_csv = argv[2];
 
   BlockingDecoder decoder;
-  RTXManager rtx_mgr;
+  SVCDecoder svc_decoder(3);
 
   decode_time_recorder = std::make_shared<CompleteFrameObserver>();
   decoder.add_frame_observer(decode_time_recorder);
+  svc_decoder.add_frame_observer(decode_time_recorder);
 
   uint16_t port = std::stoul(argv[1]);
-  auto receiver = std::make_shared<TransReceiver>(port, decoder);
+  //auto receiver = std::make_shared<TransReceiver>(port, decoder);
+  auto receiver = std::make_shared<TransReceiver>(port, svc_decoder);
   
   cout << "Starting receiver!" << endl;
   uint32_t limit_ms = -1;

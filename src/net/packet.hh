@@ -37,6 +37,7 @@
 #include "chunk.hh"
 #include "socket.hh"
 #include "exception.hh"
+#include "optional.hh"
 #include "pacer.hh"
 
 class Packet
@@ -204,6 +205,15 @@ public:
   const std::vector<Packet> & packets() const;
   bool is_key_frame() const { return is_key_frame_; }
 
+  /* setters */
+  void set_frame_no(uint32_t frame_no) // only used by svc codec
+  { 
+    frame_no_ = frame_no; 
+    for(auto & pkt : fragments_) {
+      pkt.set_frame_no(frame_no);
+    }
+  } 
+
   /* fec related */
   uint8_t get_fec_rate() const { return fec_rate_; }
   uint16_t get_num_fec_fragments() const { return num_fec_fragments_; }
@@ -231,6 +241,7 @@ public:
 /**
  * consists of a list of FragmentedFrames
  * the frame_no() in any fragmentedframe is the layer no
+ * ASSUME 0 is the base layer
  */
 class SVCFrame 
 {
@@ -238,6 +249,7 @@ private:
   uint32_t frame_no_ {};
   std::map<int, FragmentedFrame> layers_ {};
   std::vector<Packet> fragments_ {};
+  bool is_key_frame_ {false};
 
 public:
   SVCFrame(uint32_t frame_no,
@@ -257,9 +269,31 @@ public:
   const FragmentedFrame & get_layer(int index) const { return layers_.at(index); }
   const std::vector<Packet> & fragments() const { return fragments_; }
   uint32_t frame_no() const { return frame_no_; }
+  bool is_key_frame() const { return is_key_frame_; }
+
+  /* setters */
+  void set_key_frame() { is_key_frame_ = true; }
+
+  /* decode check */
+  /**
+   * return if the base layer is decodable
+   * NOTE: assume layer 0 is the base layer
+   */
+  bool decodable() const;
+  /**
+   * return if all the first xxx layers are completed
+   */
+  bool complete(unsigned expected_layers) const;
+  uint32_t decodable_size_bytes() const;
 
   /* incoming packet */
   void add_packet(const Packet & pkt);
+
+  /**
+   * convert the current complete layers into a fragmented frame
+   * for compatibility with FrameObserver interface
+   */
+  Optional<FragmentedFrame> to_fragmented_frame() const;
 };
 
 class AckPacket

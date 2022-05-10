@@ -200,7 +200,7 @@ FragmentedFrame::FragmentedFrame( const uint16_t connection_id,
 
   for ( Packet & packet : fragments_ ) {
     packet.set_fragments_in_this_frame( fragments_in_this_frame_ );
-    packet.set_fec_rate(fec_rate);
+    packet.set_fec_rate(fec_rate_);
     packet.set_red_frags_in_this_frame( num_fec_fragments_ );
 
     if (is_key_frame_) {
@@ -329,6 +329,9 @@ string FragmentedFrame::frame() const
 
   unsigned int index = 0;
   for ( const auto & fragment : fragments_ ) {
+    if (not fragment.valid()) {
+      continue;
+    }
     ret.append( fragment.payload() );
     index += 1;
     if (index + num_fec_fragments_ == fragments_.size()) {
@@ -404,7 +407,7 @@ SVCFrame::SVCFrame(uint32_t frame_no,
 }
 
 SVCFrame::SVCFrame(const Packet & pkt)
-  : frame_no_(pkt.frame_no())
+  : frame_no_(pkt.frame_no()), is_key_frame_(pkt.is_key_frame())
 {
   add_packet(pkt);
 }
@@ -435,6 +438,61 @@ void SVCFrame::add_packet(const Packet & pkt)
   else {
     layers_.at(pkt_copy.svc_layer_no()).add_packet(pkt_copy);
   }
+}
+
+bool SVCFrame::decodable() const 
+{
+  /* no base layer */
+  if (layers_.count(0) == 0) {
+    return false;
+  }
+
+  return layers_.at(0).complete();
+}
+
+bool SVCFrame::complete(unsigned expected_layers) const
+{
+  if (layers_.size() != expected_layers) {
+    return false;
+  }
+
+  for (auto & layer : layers_) {
+    if (not layer.second.complete()) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+uint32_t SVCFrame::decodable_size_bytes() const
+{
+  if (not decodable()) {
+    return 0;
+  }
+
+  /* get the size layer by layer */
+  uint32_t ret = 0;
+  for (int layer_id = 0; layers_.count(layer_id) != 0; layer_id ++) {
+    if (not layers_.at(layer_id).complete()) {
+      break;
+    }
+    ret += layers_.at(layer_id).frame().size();
+  }
+  return ret;
+}
+
+Optional<FragmentedFrame> SVCFrame::to_fragmented_frame() const
+{
+  if (not decodable()) {
+    return {};
+  }
+  
+  auto size_in_bytes = decodable_size_bytes();
+  std::vector<uint8_t> vec;
+  vec.resize(size_in_bytes);
+
+  return FragmentedFrame(0, 0, 0, frame_no_, 0, vec, is_key_frame_, 0);
 }
 
 /* AckPacket */

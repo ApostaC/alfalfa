@@ -56,4 +56,20 @@ public:
   virtual void incoming_packet(uint32_t timestamp_ms, const Packet & pkt);
 };
 
+class SVCDecoder : public DecoderInterface
+{
+private:
+  std::map<uint32_t, SVCFrame> frames_ {};
+  unsigned num_layers_ {};
+  uint32_t already_decoded_no_ {0};
+  uint32_t latest_frame_no_ {0};
+
+private:
+  void on_frame_complete(uint32_t timestamp_ms, const SVCFrame & frame);
+
+public: 
+  SVCDecoder(unsigned num_layers) : num_layers_(num_layers) {}
+  virtual void incoming_packet(uint32_t timestamp_ms, const Packet & pkt);
+};
+
 #endif

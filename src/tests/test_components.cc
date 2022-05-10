@@ -288,12 +288,20 @@ bool test_svc_frame()
   layers.emplace_back(move(enc.encode_next_frame(0).get()));
   layers.emplace_back(move(enc.encode_next_frame(0).get()));
   layers.emplace_back(move(enc.encode_next_frame(0).get()));
+  layers[0].set_frame_no(0);
+  layers[1].set_frame_no(1);
+  layers[2].set_frame_no(2);
 
   SVCFrame svc_frame(10, move(layers));
   auto packets = svc_frame.fragments();
+  decltype(packets) rec_packets;
+  for(auto pkt : packets) {
+    Packet rec_packet(pkt.to_string());
+    rec_packets.push_back(rec_packet);
+  }
   int frag_id = 0;
   /* check frame rewritting */
-  for (auto & pkt : packets) {
+  for (auto & pkt : rec_packets) {
     assert(pkt.frame_no() == 10);
     assert(pkt.fragment_no() == frag_id);
     cerr << "pkt: " << pkt.frame_no() << "," << pkt.fragment_no() 
@@ -303,18 +311,101 @@ bool test_svc_frame()
   }
 
   /* check reconstruct */
-  SVCFrame rec_frame(packets[3]);
+  SVCFrame rec_frame(rec_packets[3]);
   assert(rec_frame.frame_no() == 10);
-  for (unsigned i = 0; i < packets.size() - 1; i++) {
-    rec_frame.add_packet(packets[i]);
+  assert(not rec_frame.decodable());
+  for (unsigned i = 0; i < rec_packets.size() - 1; i++) {
+    rec_frame.add_packet(rec_packets[i]);
   }
+  assert(rec_frame.get_layer(0).complete());
   assert(rec_frame.get_layer(1).complete());
+  assert(not rec_frame.get_layer(2).complete());
+
+  assert(rec_frame.decodable());
+  assert(rec_frame.to_fragmented_frame().initialized());
+  assert(rec_frame.complete(3) == false);
+  cerr << "When not complete: the size is: " << rec_frame.decodable_size_bytes() << endl;
+  assert(rec_frame.decodable_size_bytes() == rec_frame.to_fragmented_frame().get().frame().size());
+
+  rec_frame.add_packet(rec_packets[rec_packets.size() - 1]);
   assert(rec_frame.get_layer(2).complete());
-  assert(not rec_frame.get_layer(3).complete());
-  rec_frame.add_packet(packets[packets.size() - 1]);
-  assert(rec_frame.get_layer(3).complete());
+  assert(rec_frame.decodable_size_bytes() == rec_frame.to_fragmented_frame().get().frame().size());
+  assert(rec_frame.complete(3) == true);
+  cerr << "When complete: the size is: " << rec_frame.decodable_size_bytes() << endl;
 
   out_green(cerr) << "-------------- PASSED: svc frame ----------------"; out_normal(cerr) << endl;
+  return true;
+}
+
+bool test_svc_codec()
+{
+  out_green(cerr) << "============== test: svc codec ================="; out_normal(cerr) << endl;
+  SVCEncoder enc(2000 * 125, 25, {0.40, 0.3, 0.3}, {255, 0, 0});
+  enc.set_gop(3);
+  std::vector<std::vector<Packet>> frames;
+  for (int i=0;i<4;i++) {
+    frames.emplace_back(enc.encode_next_frame_packets(0));
+    cerr << "Frame: " << i+1 << " got " << frames.back().size() << " packets" << endl;
+    if (i % 3 == 0) {
+      assert(frames.back().back().is_key_frame());
+    }
+  }
+  
+  SVCDecoder decoder(3);
+  auto obs = std::make_shared<FrameArrivalTimeObserver>();
+  decoder.add_frame_observer(obs);
+
+  auto ts = 0;
+  // ts = 1, frame 1 is complete, (1, 1)
+  ts = 1;
+  for(auto pkt : frames[0]) {
+    decoder.incoming_packet(ts, pkt);
+  }
+
+  // ts = 2, frame 2 is not complete 
+  ts = 2;
+  decoder.incoming_packet(ts, frames[1][0]);
+
+  // ts = 3, frame 3 is base-layer decodable 
+  ts = 3;
+  for (auto pkt : frames[2]) {
+    if (pkt.svc_layer_no() == 0) {
+      decoder.incoming_packet(ts, pkt);
+    }
+  }
+
+  // ts = 4, frame 2 is complete (2, 4)
+  ts = 4;
+  for (auto pkt : frames[1]) {
+    decoder.incoming_packet(ts, pkt);
+  }
+
+  // ts = 5, frame 4 is base-layer complete (frame 3 should be pushed) (3, 5)
+  ts = 5;
+  for (auto pkt : frames[3]) {
+    if (pkt.svc_layer_no() == 0) {
+      decoder.incoming_packet(ts, pkt);
+    }
+  }
+
+  // ts = 6, frame 4 is complete (4, 6)
+  ts = 6;
+  for (auto pkt : frames[3]) {
+    if (pkt.svc_layer_no() != 0) {
+      decoder.incoming_packet(ts, pkt);
+    }
+  }
+
+  auto final_result = obs->arrival_time();
+  decltype(final_result) expected_result{{1,1}, {2,4}, {3,5}, {4,6}};
+  assert(final_result.size() == expected_result.size());
+
+  for (auto ent : final_result) {
+    cerr << ent.first << " " << ent.second << endl;
+    assert(ent.second == expected_result[ent.first]);
+  }
+
+  out_green(cerr) << "-------------- PASSED: svc codec ----------------"; out_normal(cerr) << endl;
   return true;
 }
 
@@ -327,6 +418,7 @@ int main(int argc, char *argv[])
 
   test_basic_encoder_decoder();
   test_svc_frame();
+  test_svc_codec();
   test_blocking_decoder();
   test_rtx_mgr();
   test_fec();

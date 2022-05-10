@@ -99,6 +99,35 @@ uint32_t RTXManager::get_rtx_bitrate_byteps(uint32_t timestamp_ms)
   return tot_size_bytes * 1000 / RTX_RATE_WINDOW_MS;
 }
 
+/* SVCRTXManager */
+void SVCRTXManager::on_packet_sent(uint32_t timestamp_ms, const Packet & pkt) 
+{
+  if (!pkt.is_svc()) {
+    cerr << "Warning: using SVCCRTXManager but the packet is not SVC" << endl;
+    return;
+  }
+  if (pkt.svc_layer_no() == 0) { // it's base layer
+    mgr.on_packet_sent(timestamp_ms, pkt);
+  }
+
+  /* ignore non-base layer packets */
+}
+
+void SVCRTXManager::on_ack_received(uint32_t timestamp_ms, const AckPacket & ack, std::deque<Packet> & tgt_buf)
+{
+  mgr.on_ack_received(timestamp_ms, ack, tgt_buf);
+}
+
+void SVCRTXManager::on_rtx_sent(uint32_t timestamp_ms, const Packet &pkt) 
+{
+  mgr.on_rtx_sent(timestamp_ms, pkt);
+}
+
+uint32_t SVCRTXManager::get_rtx_bitrate_byteps(uint32_t timestamp_ms)
+{
+  return mgr.get_rtx_bitrate_byteps(timestamp_ms);
+}
+
 BudgetPacer::BudgetPacer(int max_budget_)
   : max_budget_(max_budget_)
 {
@@ -189,14 +218,9 @@ TransSender::TransSender(const Address & peer_addr, uint32_t fps,
                << ", cached loss rate is " << this->cached_loss_rate_
                << ", target bitrate = " << tgt_rate << endl;
 
-          auto frame = this->encoder_.encode_next_frame(now_ms);
-          if (frame.initialized())
-          {
-            auto packets = frame.get().packets();
-            this->data_queue_.insert(this->data_queue_.end(), make_move_iterator(packets.begin()),
-                                     make_move_iterator(packets.end()));
-            packets.clear();
-          }
+          auto packets = this->encoder_.encode_next_frame_packets(now_ms);
+          this->data_queue_.insert(this->data_queue_.end(), make_move_iterator(packets.begin()),
+                                   make_move_iterator(packets.end()));
 
           this->pacer_.set_pacing_rate(this->cached_pacing_rate_);
           cerr << "[" << now_ms << "] Queue length is " << this->data_queue_.size() 

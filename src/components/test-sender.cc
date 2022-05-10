@@ -45,6 +45,58 @@ void sigint_handler(int signum)
   exit(signum);
 }
 
+RTXInterface & get_rtx(const std::string & name)
+{
+  static RTXManager all_rtx;
+  static NoRTX no_rtx;
+  static SVCRTXManager svc_rtx;
+  if (name == "all") {
+    cerr << "Using all RTX" << endl;
+    return std::ref(all_rtx);
+  }
+  else if (name == "svc") {
+    cerr << "Using svc RTX" << endl;
+    return std::ref(svc_rtx);
+  }
+  else {
+    cerr << "Using no rtx" << endl;
+    return std::ref(no_rtx);
+  }
+}
+
+CongestionControlInterface & get_cc(const std::string & name, BandwidthController & bw, int fps=25)
+{
+  static SalsifyCongestionControl cc(100, fps);
+  static GCCMinus gcc; gcc.set_initial_rate_estimation(bw.init_bandwidth_byteps() * 0.6);
+  static BBRMinus bbr; bbr.set_initial_rate_estimation(bw.init_bandwidth_byteps() * 0.6);
+  if (name == "salsify") {
+    return std::ref(cc);
+  }
+  else if (name == "gcc") {
+    return std::ref(gcc);
+  }
+  else if (name == "bbr") {
+    return std::ref(bbr);
+  }
+  else {
+    return bw.get_oracle_cc();
+  }
+}
+
+EncoderInterface & get_codec(const std::string & name, double prot, int fps=25)
+{
+  static BasicEncoder basic_enc(500 * 125, fps);
+  basic_enc.set_protection_overhead(prot);
+  static SVCEncoder svc_enc(500 * 125, fps, {0.4, 0.3, 0.3}, {255, 0, 0});
+  
+  if (name == "svc") {
+    return std::ref(svc_enc);
+  }
+  else {
+    return std::ref(basic_enc);
+  }
+}
+
 int main(int argc, char *argv[])
 {
   std::cerr.sync_with_stdio(false);
@@ -57,33 +109,24 @@ int main(int argc, char *argv[])
   }
   output_csv = argv[4];
 
-  // start TC
-  int err;
-  err = system("sudo tc qdisc del dev ingress root");
-  err = system("sudo tc qdisc add dev ingress root handle 1: tbf rate 5000kbit buffer 1500 latency 300ms");
-  if (err) {
-    throw runtime_error("Cannot start TC tbf");
-  }
-  //err = system("sudo tc qdisc add dev ingress parent 1:1 handle 10: netem loss random 5%");
-  //if (err) {
-  //  throw runtime_error("Cannot start TC netem");
-  //}
-
   BandwidthController bw_ctrl("../../test/test-loss.csv", "ingress", 300);
 
   int fps = 25;
-  BasicEncoder encoder(500 * 125, fps);
-  encoder.set_protection_overhead(std::stod(argv[3]));
+  auto & encoder = get_codec("svc", std::stod(argv[3]), fps);
+  auto & cc = get_cc("bbr", bw_ctrl, fps);
+  auto & rtx_mgr = get_rtx("svc");
+  //BasicEncoder encoder(500 * 125, fps);
+  //encoder.set_protection_overhead(std::stod(argv[3]));
   //double fec_rate = std::stod(argv[3]);
   //encoder.set_fec_rate(255u * fec_rate);
 
   //SalsifyCongestionControl cc(100, fps);
   //GCCMinus cc;
-  BBRMinus cc;
-  cc.set_initial_rate_estimation(bw_ctrl.init_bandwidth_byteps() * 0.6);
-  OracleCongestionControl & orac_cc = bw_ctrl.get_oracle_cc();
+  //BBRMinus cc;
+  //cc.set_initial_rate_estimation(bw_ctrl.init_bandwidth_byteps() * 0.6);
+  //OracleCongestionControl & orac_cc = bw_ctrl.get_oracle_cc();
 
-  RTXManager rtx_mgr;
+  //RTXManager rtx_mgr;
 
   encode_time_recorder = std::make_shared<CompleteFrameObserver>();
   encoder.add_frame_observer(encode_time_recorder);
@@ -100,6 +143,5 @@ int main(int argc, char *argv[])
 
   bw_ctrl.stop();
   dump_output_time();
-  (void)orac_cc;
   return 0;
 }
