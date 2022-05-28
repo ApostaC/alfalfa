@@ -10,7 +10,7 @@ noinst_LIBRARIES = libalfalfacomp.a
 libalfalfacomp_a_SOURCES = comp_encoder.hh comp_encoder.cc \
 			frame_observer.hh frame_observer.cc comp_decoder.hh comp_decoder.cc \
 			transmission.hh transmission.cc congestion_control.hh congestion_control.cc \
-			bw_control.hh bw_control.cc
+			bw_control.hh bw_control.cc stats.hh stats.cc
 
 bin_PROGRAMS = test-sender test-receiver
 

@@ -963,7 +963,7 @@ void BBRMinus::on_ack_received(uint32_t timestamp_ms, const AckPacket &p)
       /* only update RTT for non-retrans packets */
       auto rtt = timestamp_ms - p.send_time_ms();
       rtprop_.update(rtt, timestamp_ms);
-      cerr << "HERE RTT = " << rtt << endl;
+      //cerr << "HERE RTT = " << rtt << endl;
     }
 
     /* remove from unacked */

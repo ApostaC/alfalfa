@@ -4,6 +4,7 @@
 #include "packet.hh"
 #include "frame_observer.hh"
 #include "optional.hh"
+#include "stats.hh"
 
 /**
  * basic interface for a encoder
@@ -40,6 +41,8 @@ private:
 
   constexpr static int DEFAULT_GOP = 250; 
 
+  StatsRecorder stats_recoder_ {"/tmp/encoder.csv"};
+
 public:
   BasicEncoder(uint32_t init_bitrate, uint16_t fps);
 
@@ -59,6 +62,8 @@ public:
   void set_protection_overhead(double overhead) { protection_overhead_ = overhead; };
   void set_fec_rate(uint8_t fec_rate) { fec_rate_ = fec_rate; }
   uint8_t fec_rate() const { return fec_rate_; }
+
+  ~BasicEncoder() { stats_recoder_.dump(true); }
 };
 
 class SVCEncoder : public EncoderInterface

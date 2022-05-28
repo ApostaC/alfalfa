@@ -11,6 +11,7 @@
 #include "frame_observer.hh"
 #include "timestamp.hh"
 #include "bw_control.hh"
+#include "stats.hh"
 
 using namespace std; 
 
@@ -109,12 +110,13 @@ int main(int argc, char *argv[])
   }
   output_csv = argv[4];
 
-  BandwidthController bw_ctrl("../../test/test-loss.csv", "ingress", 300);
+  BandwidthController bw_ctrl("../../test/fcc_for_emulation/0.csv", "ingress", 300);
+  //BandwidthController bw_ctrl("../../test/test-bw.csv", "ingress", 300);
 
   int fps = 25;
-  auto & encoder = get_codec("svc", std::stod(argv[3]), fps);
+  auto & encoder = get_codec("basic", std::stod(argv[3]), fps);
   auto & cc = get_cc("bbr", bw_ctrl, fps);
-  auto & rtx_mgr = get_rtx("svc");
+  auto & rtx_mgr = get_rtx("all");
   //BasicEncoder encoder(500 * 125, fps);
   //encoder.set_protection_overhead(std::stod(argv[3]));
   //double fec_rate = std::stod(argv[3]);
@@ -131,17 +133,25 @@ int main(int argc, char *argv[])
   encode_time_recorder = std::make_shared<CompleteFrameObserver>();
   encoder.add_frame_observer(encode_time_recorder);
 
+  auto real_data = std::make_shared<StatsRecorder>("temp/real.csv");
+  auto pred_data = std::make_shared<StatsRecorder>("temp/pred.csv");
+  bw_ctrl.get_oracle_cc().add_observer(real_data);
+  cc.add_observer(pred_data);
+
   auto sender = std::make_shared<TransSender>(Address(argv[1], argv[2]), fps, std::ref(cc), std::ref(encoder), std::ref(rtx_mgr));
   cc.add_observer(sender);
   //auto sender = std::make_shared<TransSender>(Address(argv[1], argv[2]), fps, std::ref(orac_cc), std::ref(encoder), std::ref(rtx_mgr));
   //orac_cc.add_observer(sender);
 
   cout << "Starting sender!" << endl;
-  uint32_t limit_ms = 12 * 1000;
+  uint32_t limit_ms = 30 * 1000;
   bw_ctrl.start();
   sender->start(limit_ms);
 
   bw_ctrl.stop();
+
+  real_data->dump(true);
+  pred_data->dump(true);
   dump_output_time();
   return 0;
 }

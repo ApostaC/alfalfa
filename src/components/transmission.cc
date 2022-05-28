@@ -96,6 +96,7 @@ uint32_t RTXManager::get_rtx_bitrate_byteps(uint32_t timestamp_ms)
   for(auto it = start_it; it != end_it; ++it) {
     tot_size_bytes += it->second;
   }
+
   return tot_size_bytes * 1000 / RTX_RATE_WINDOW_MS;
 }
 
@@ -196,13 +197,15 @@ TransSender::TransSender(const Address & peer_addr, uint32_t fps,
           if (exp > 1) {
             cerr << "Warning: skip " << exp - 1 << " frames! " << std::endl;
           }
+          uint32_t now_ms = timestamp_ms();
 
           /* estimate rtx rate based on rtx queue length */
-          auto rtx_rate = 0;
-          for (auto & p : this->rtx_queue_) {
-            rtx_rate += (p.payload().length() + 40) * this->fps_;
-          }
-          rtx_rate += this->cached_target_rate_ * this->cached_loss_rate_;
+          //auto rtx_rate = 0;
+          //for (auto & p : this->rtx_queue_) {
+          //  rtx_rate += (p.payload().length() + 40) * this->fps_;
+          //}
+          //rtx_rate += this->cached_target_rate_ * this->cached_loss_rate_;
+          auto rtx_rate = this->rtx_mgr_.get_rtx_bitrate_byteps(now_ms);
 
           /* set target bitrate */
           int tgt_rate = this->cached_target_rate_ - rtx_rate;
@@ -211,7 +214,6 @@ TransSender::TransSender(const Address & peer_addr, uint32_t fps,
 
           /* encode */
           // TODO: change the frame's interval here (need to matain last_encoded_frame_timestamp_ms_)
-          uint32_t now_ms = timestamp_ms();
           cerr << "[" << now_ms << "] estimated rtx rate " << rtx_rate 
                << ", cached pacing rate is " << this->cached_pacing_rate_
                << ", cached target rate is " << this->cached_target_rate_
