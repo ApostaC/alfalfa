@@ -2,6 +2,7 @@
 #include <signal.h>
 #include <iostream>
 #include <fstream>
+#include <nlohmann/json.hpp>
 
 #include "transmission.hh"
 #include "comp_decoder.hh"
@@ -11,19 +12,20 @@ using namespace std;
 
 namespace {
   shared_ptr<CompleteFrameObserver> decode_time_recorder {};
+  string config_file {};
   string output_csv {};
 } // anonymous namespace for global variables
 
 void print_usage(char *argv[])
 {
-  cerr << "Usage: " << argv[0] << " <port> <output file>" << endl;
+  cerr << "Usage: " << argv[0] << " <port> <config file>" << endl;
 }
 
 void dump_output_time()
 {
   ofstream fout(output_csv, ios::out);
   if (not fout or not decode_time_recorder) {
-    cerr << "Errorain dump_output_time" << endl; 
+    cerr << "Error in dump_output_time" << endl; 
   }
 
   decode_time_recorder->to_csv(fout);
@@ -37,23 +39,42 @@ void sigint_handler(int signum)
   exit(signum);
 }
 
+DecoderInterface & get_codec(const std::string & name)
+{
+  static BlockingDecoder basic_decoder;
+  static SVCDecoder svc_decoder(3);
+  
+  if (name == "svc") {
+    return std::ref(svc_decoder);
+  }
+  else {
+    return std::ref(basic_decoder);
+  }
+}
+
 int main(int argc, char *argv[])
 {
   signal(SIGINT, sigint_handler);
-  output_csv = "test-receiver.csv";
 
   if (argc != 3) {
     print_usage(argv);
     exit(1);
   }
-  output_csv = argv[2];
+  config_file = argv[2];
 
-  BlockingDecoder decoder;
-  SVCDecoder svc_decoder(3);
+  /* parse the config file */
+  nlohmann::json j;
+  ifstream fconfig(config_file);
+  if (!fconfig) {
+    throw runtime_error("Cannot open configure file: " + config_file + " for read");
+  }
+  fconfig >> j;
 
+  output_csv = string(j["output_folder"]) + string(j["decoder_output"]);
+
+  auto & decoder = get_codec(j["codec"]);
   decode_time_recorder = std::make_shared<CompleteFrameObserver>();
   decoder.add_frame_observer(decode_time_recorder);
-  svc_decoder.add_frame_observer(decode_time_recorder);
 
   uint16_t port = std::stoul(argv[1]);
   auto receiver = std::make_shared<TransReceiver>(port, decoder);

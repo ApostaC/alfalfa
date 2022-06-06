@@ -5,6 +5,7 @@
 #include <thread>
 #include <iostream>
 #include <fstream>
+#include <nlohmann/json.hpp>
 
 #include "transmission.hh"
 #include "comp_encoder.hh"
@@ -13,16 +14,27 @@
 #include "bw_control.hh"
 #include "stats.hh"
 
+/**
+ * Config file items:
+ *  id: the run-id
+ *  trace: the path of the network trace
+ *  codec: the codec, could be {"svc", "basic"}
+ *  cc: the congestion control, could be {"gcc", "bbr", "salsify", "oracle"}
+ *  fec_rate: the overhead ratio of fec (1.5 means 1.5 * loss)
+ *  length_ms: the length of emulation, in milliseconds
+ */
+
 using namespace std; 
 
 namespace {
   shared_ptr<CompleteFrameObserver> encode_time_recorder {};
+  string config_file{};
   string output_csv {};
 } // anonymous namespace for gingressbal variables
 
 void print_usage(char *argv[])
 {
-  cerr << "Usage: " << argv[0] << " <ip> <port> <fec rate> <output file>" << endl;
+  cerr << "Usage: " << argv[0] << " <ip> <port> <config_file>" << endl;
 }
 
 void dump_output_time()
@@ -46,23 +58,23 @@ void sigint_handler(int signum)
   exit(signum);
 }
 
-RTXInterface & get_rtx(const std::string & name)
+RTXInterface & get_rtx(const std::string & codec)
 {
   static RTXManager all_rtx;
   static NoRTX no_rtx;
   static SVCRTXManager svc_rtx;
-  if (name == "all") {
-    cerr << "Using all RTX" << endl;
-    return std::ref(all_rtx);
-  }
-  else if (name == "svc") {
+  if (codec == "svc") {
     cerr << "Using svc RTX" << endl;
     return std::ref(svc_rtx);
   }
   else {
-    cerr << "Using no rtx" << endl;
-    return std::ref(no_rtx);
+    cerr << "Using all RTX" << endl;
+    return std::ref(all_rtx);
   }
+  //else {
+  //  cerr << "Using no rtx" << endl;
+  //  return std::ref(no_rtx);
+  //}
 }
 
 CongestionControlInterface & get_cc(const std::string & name, BandwidthController & bw, int fps=25)
@@ -102,21 +114,39 @@ int main(int argc, char *argv[])
 {
   std::cerr.sync_with_stdio(false);
   signal(SIGINT, sigint_handler);
-  output_csv = "test-sender.csv";
 
-  if (argc != 5) {
+  if (argc != 4) {
     print_usage(argv);
     exit(1);
   }
-  output_csv = argv[4];
+  config_file = argv[3];
+  
+  /* parse the input json */
+  nlohmann::json j;
+  ifstream fconfig(config_file);
+  if (!fconfig) {
+    throw runtime_error("Cannot open configure file: " + config_file + " for read");
+  }
+  fconfig >> j;
 
-  BandwidthController bw_ctrl("../../test/fcc_for_emulation/0.csv", "ingress", 300);
+  /* check the output directory */
+  string cmd = "mkdir -p " + string(j["output_folder"]);
+  int err = system(cmd.c_str());
+  if (err) {
+    throw runtime_error("Cannot run " + cmd);
+  }
+
+  output_csv = string(j["output_folder"]) + string(j["encoder_output"]);
+  string real_csv = string(j["output_folder"]) + string(j["real_stats"]);
+  string pred_csv = string(j["output_folder"]) + string(j["pred_stats"]);
+
+  BandwidthController bw_ctrl(j["trace"], "ingress", 300);
   //BandwidthController bw_ctrl("../../test/test-bw.csv", "ingress", 300);
 
   int fps = 25;
-  auto & encoder = get_codec("basic", std::stod(argv[3]), fps);
-  auto & cc = get_cc("bbr", bw_ctrl, fps);
-  auto & rtx_mgr = get_rtx("all");
+  auto & encoder = get_codec(j["codec"], j["fec_rate"], fps);
+  auto & cc = get_cc(j["cc"], bw_ctrl, fps);
+  auto & rtx_mgr = get_rtx(j["codec"]);
   //BasicEncoder encoder(500 * 125, fps);
   //encoder.set_protection_overhead(std::stod(argv[3]));
   //double fec_rate = std::stod(argv[3]);
@@ -133,8 +163,8 @@ int main(int argc, char *argv[])
   encode_time_recorder = std::make_shared<CompleteFrameObserver>();
   encoder.add_frame_observer(encode_time_recorder);
 
-  auto real_data = std::make_shared<StatsRecorder>("temp/real.csv");
-  auto pred_data = std::make_shared<StatsRecorder>("temp/pred.csv");
+  auto real_data = std::make_shared<StatsRecorder>(real_csv);
+  auto pred_data = std::make_shared<StatsRecorder>(pred_csv);
   bw_ctrl.get_oracle_cc().add_observer(real_data);
   cc.add_observer(pred_data);
 
@@ -144,7 +174,7 @@ int main(int argc, char *argv[])
   //orac_cc.add_observer(sender);
 
   cout << "Starting sender!" << endl;
-  uint32_t limit_ms = 30 * 1000;
+  uint32_t limit_ms = j["length_ms"];
   bw_ctrl.start();
   sender->start(limit_ms);
 

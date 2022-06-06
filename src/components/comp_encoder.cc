@@ -450,20 +450,24 @@ BasicEncoder::BasicEncoder(uint32_t init_bitrate_byteps, uint16_t fps)
 
 void BasicEncoder::set_loss_rate(double loss_rate)
 {
-  // compute FEC rate
-  int bitrate_kbps = max(target_bitrate_byteps_ / 125, 200u);
-  int rate_lvl = (bitrate_kbps - 200) / 100;
-  rate_lvl = min(rate_lvl, 49);
-  int loss_lvl = loss_rate * 256;
-  loss_lvl = min(loss_lvl, 128);
+  /* compute FEC rate using webrtc logic */
+  {
+    //int bitrate_kbps = max(target_bitrate_byteps_ / 125, 200u);
+    //int rate_lvl = (bitrate_kbps - 200) / 100;
+    //rate_lvl = min(rate_lvl, 49);
+    //int loss_lvl = loss_rate * 256;
+    //loss_lvl = min(loss_lvl, 128);
 
-  //cerr << "rate lvl = " << rate_lvl << endl;
+    ////cerr << "rate lvl = " << rate_lvl << endl;
 
-  uint8_t code_rate = kFecRateTable[rate_lvl * 129 + loss_lvl];
-  fec_rate_ = code_rate * 2;
-  //auto fec_ratio = min(loss_rate * protection_overhead_, 0.5);
-  //auto fec_rate_d = min(fec_ratio / (1 - fec_ratio), 1.);
-  //fec_rate_ = 255 * fec_rate_d;
+    //uint8_t code_rate = kFecRateTable[rate_lvl * 129 + loss_lvl];
+    //fec_rate_ = code_rate * 2;
+  }
+
+  /* computing FEC rate using pre-configured protection overhead */
+  auto fec_ratio = min(loss_rate * protection_overhead_, 0.5);
+  auto fec_rate_d = min(fec_ratio / (1 - fec_ratio), 1.);
+  fec_rate_ = 255 * fec_rate_d;
 }
 
 Optional<FragmentedFrame> BasicEncoder::encode_next_frame(uint32_t curr_timestamp_ms)

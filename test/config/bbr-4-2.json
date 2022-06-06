@@ -1,0 +1,1 @@
+{"trace": "/home/aposta/projects/alfalfa/test/fcc_for_emulation/4.csv", "codec": "basic", "cc": "bbr", "fec_rate": 0, "length_ms": 40000, "output_folder": "/home/aposta/projects/alfalfa/results/bbr/", "encoder_output": "encoder-4-2.csv", "decoder_output": "decoder-4-2.csv", "real_stats": "real-4-2.csv", "pred_stats": "pred-4-2.csv"}

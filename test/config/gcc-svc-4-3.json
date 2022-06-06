@@ -1,0 +1,1 @@
+{"trace": "/home/aposta/projects/alfalfa/test/fcc_for_emulation/4.csv", "codec": "svc", "cc": "gcc", "fec_rate": 1.5, "length_ms": 40000, "output_folder": "/home/aposta/projects/alfalfa/results/gcc-svc/", "encoder_output": "encoder-4-3.csv", "decoder_output": "decoder-4-3.csv", "real_stats": "real-4-3.csv", "pred_stats": "pred-4-3.csv"}
