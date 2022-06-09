@@ -30,6 +30,7 @@ namespace {
   shared_ptr<CompleteFrameObserver> encode_time_recorder {};
   string config_file{};
   string output_csv {};
+  string encoder_stats_file{};
 } // anonymous namespace for gingressbal variables
 
 void print_usage(char *argv[])
@@ -98,7 +99,7 @@ CongestionControlInterface & get_cc(const std::string & name, BandwidthControlle
 
 EncoderInterface & get_codec(const std::string & name, double prot, int fps=25)
 {
-  static BasicEncoder basic_enc(500 * 125, fps);
+  static BasicEncoder basic_enc(500 * 125, fps, encoder_stats_file);
   basic_enc.set_protection_overhead(prot);
   static SVCEncoder svc_enc(500 * 125, fps, {0.4, 0.3, 0.3}, {255, 0, 0});
   
@@ -137,6 +138,7 @@ int main(int argc, char *argv[])
   }
 
   output_csv = string(j["output_folder"]) + string(j["encoder_output"]);
+  encoder_stats_file = string(j["output_folder"]) + string(j["encoder_stats"]);
   string real_csv = string(j["output_folder"]) + string(j["real_stats"]);
   string pred_csv = string(j["output_folder"]) + string(j["pred_stats"]);
 
@@ -166,6 +168,7 @@ int main(int argc, char *argv[])
   auto real_data = std::make_shared<StatsRecorder>(real_csv);
   auto pred_data = std::make_shared<StatsRecorder>(pred_csv);
   bw_ctrl.get_oracle_cc().add_observer(real_data);
+  //bw_ctrl.get_oracle_cc().set_real_stats_observer(real_data);
   cc.add_observer(pred_data);
 
   auto sender = std::make_shared<TransSender>(Address(argv[1], argv[2]), fps, std::ref(cc), std::ref(encoder), std::ref(rtx_mgr));

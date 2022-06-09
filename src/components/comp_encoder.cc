@@ -443,9 +443,14 @@ static const unsigned char kFecRateTable[kFecRateTableSize] = {
 };
 
 BasicEncoder::BasicEncoder(uint32_t init_bitrate_byteps, uint16_t fps)
-  : target_bitrate_byteps_(init_bitrate_byteps), fps_(fps)
+  : target_bitrate_byteps_(init_bitrate_byteps), fps_(fps), stats_recoder_("/tmp/encoder.csv")
 {
   stats_recoder_.post_updates(0, 0, 0);
+}
+
+BasicEncoder::BasicEncoder(uint32_t init_bitrate_byteps, uint16_t fps, const string & stats_file)
+  : target_bitrate_byteps_(init_bitrate_byteps), fps_(fps), stats_recoder_(stats_file)
+{
 }
 
 void BasicEncoder::set_loss_rate(double loss_rate)
@@ -515,8 +520,9 @@ std::vector<Packet> BasicEncoder::encode_next_frame_packets(uint32_t curr_timest
 
 /* SVC Codec */
 SVCEncoder::SVCEncoder(uint32_t init_bitrate, uint16_t fps,
-                       const vector<double> & size_ratios, const vector<uint8_t> & fec_rates)
-  : size_ratios_(size_ratios), fec_rates_(fec_rates)
+                       const vector<double> & size_ratios, const vector<uint8_t> & fec_rates,
+                       const string & stats_file)
+  : size_ratios_(size_ratios), fec_rates_(fec_rates), stats_recoder_(stats_file)
 {
   /* initialize layer_encoders_ */
   assert(size_ratios.size() == fec_rates.size());
@@ -530,6 +536,11 @@ SVCEncoder::SVCEncoder(uint32_t init_bitrate, uint16_t fps,
     layer_encoders_.back().set_protection_overhead(1);
   }
 }
+
+SVCEncoder::SVCEncoder(uint32_t init_bitrate, uint16_t fps,
+                       const vector<double> & size_ratios, const vector<uint8_t> & fec_rates)
+  : SVCEncoder(init_bitrate, fps, size_ratios, fec_rates, "/tmp/svc_encoder.csv")
+{}
 
 void SVCEncoder::set_target_bitrate(uint32_t bitrate_byteps) 
 {
@@ -555,6 +566,7 @@ Optional<FragmentedFrame> SVCEncoder::encode_next_frame(uint32_t)
 std::vector<Packet> SVCEncoder::encode_next_frame_packets(uint32_t curr_timestamp_ms)
 {
   frame_id_ += 1;
+
   /* encode layers */
   std::vector<FragmentedFrame> temp_frames;
   uint32_t layer_id = 0;

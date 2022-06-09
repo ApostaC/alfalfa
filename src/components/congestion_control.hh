@@ -163,16 +163,25 @@ private:
   uint32_t real_bw_byteps_ {0};
   double real_loss_rate_ {0};
 
+  LossCalculator loss_calc_ {};
   std::shared_ptr<CCStatsRecorder> stats_{};
+
+  /* for real stats update */
+  std::shared_ptr<CongestionControlObserver> real_stats_obs_{};
+  uint32_t last_real_stats_update_ms_ {0};
 
 private:
   void post_updates(); 
+  void update_real_stats(uint32_t timestamp_ms);
 
 public:
   OracleCongestionControl() { stats_ = std::make_shared<CCStatsRecorder>(); add_observer(stats_); }
 
   virtual void on_packet_sent(uint32_t timestamp_ms, const Packet &p) override;
   virtual void on_ack_received(uint32_t timestamp_ms, const AckPacket &p) override;
+
+  virtual void set_real_stats_observer(std::shared_ptr<CongestionControlObserver> obs) { real_stats_obs_ = obs; }
+  std::shared_ptr<CongestionControlObserver> get_real_stats_observer() { return real_stats_obs_; }
 
   void set_bw(uint32_t bw_byteps);
   void set_loss(double loss_rate);

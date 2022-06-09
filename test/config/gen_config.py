@@ -33,6 +33,7 @@ def construct_json_object(config, trace, key, postfix):
             "output_folder": f"/home/aposta/projects/alfalfa/results/{key}/",
             "encoder_output": f"encoder-{postfix}.csv",
             "decoder_output": f"decoder-{postfix}.csv",
+            "encoder_stats": f"encstat-{postfix}.csv",
             "real_stats": f"real-{postfix}.csv",
             "pred_stats": f"pred-{postfix}.csv"
         }

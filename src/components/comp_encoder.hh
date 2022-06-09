@@ -41,10 +41,11 @@ private:
 
   constexpr static int DEFAULT_GOP = 250; 
 
-  StatsRecorder stats_recoder_ {"/tmp/encoder.csv"};
+  StatsRecorder stats_recoder_;
 
 public:
   BasicEncoder(uint32_t init_bitrate, uint16_t fps);
+  BasicEncoder(uint32_t init_bitrate, uint16_t fps, const std::string &stats_file);
 
   void set_gop(uint32_t gop) { gop_ = gop; }
   uint32_t gop() const { return gop_; }
@@ -77,12 +78,18 @@ private:
   uint32_t frame_id_ {0};
   uint32_t gop_{DEFAULT_GOP};
 
+  StatsRecorder stats_recoder_;
+
 public:
   /**
    * order: from base layer to highest layer
    */
   SVCEncoder(uint32_t init_bitrate, uint16_t fps,
              const std::vector<double> & size_ratios, const std::vector<uint8_t> & fec_rates);
+
+  SVCEncoder(uint32_t init_bitrate, uint16_t fps,
+             const std::vector<double> & size_ratios, const std::vector<uint8_t> & fec_rates,
+             const std::string & stats_file);
 
   virtual void set_target_bitrate(uint32_t bitrate_byteps) override; 
   virtual void set_loss_rate(double) override {} /* do nothing when loss, because we add a fixed fec rate */

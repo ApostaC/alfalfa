@@ -17,7 +17,7 @@ echo "Target PORT = $PORT"
 BIN=./test-receiver
 CFG_DIR=/home/aposta/projects/alfalfa/test/config/
 
-for file in $CFG_DIR/*-5-1.json; do
+for file in $CFG_DIR/*-3-1.json; do
     echo "Starting receiver with the configure file $file"
     $BIN $PORT $file 
     sleep 1

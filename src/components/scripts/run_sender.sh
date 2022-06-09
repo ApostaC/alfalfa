@@ -18,7 +18,7 @@ echo "Target Address = $MAHIMAHI_BASE:$PORT"
 BIN=./test-sender
 CFG_DIR=/home/aposta/projects/alfalfa/test/config/
 
-for file in $CFG_DIR/*-5-1.json; do
+for file in $CFG_DIR/*-3-1.json; do
     echo "Starting sender with the configure file $file"
     $BIN $MAHIMAHI_BASE $PORT $file 
     sleep 5s

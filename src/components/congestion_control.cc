@@ -93,14 +93,35 @@ void OracleCongestionControl::post_updates()
   }
 }
 
+void OracleCongestionControl::update_real_stats(uint32_t timestamp_ms)
+{
+  const static uint32_t UPDATE_INTERVAL_MS = 100;
+  if (timestamp_ms - last_real_stats_update_ms_ <= UPDATE_INTERVAL_MS) {
+    return;
+  }
+
+  if (not real_stats_obs_) {
+    return;
+  }
+
+  auto bw = get_bw();
+  auto loss = get_loss();
+  real_stats_obs_->post_updates(bw, bw * 0.9, loss);
+  last_real_stats_update_ms_ = timestamp_ms;
+}
+
 void OracleCongestionControl::on_packet_sent(uint32_t ts, const Packet & p) 
 {
   stats_->on_packet_sent(ts, p);
+  loss_calc_.on_packet_sent(ts, p);
+  update_real_stats(ts);
 }
 
 void OracleCongestionControl::on_ack_received(uint32_t ts, const AckPacket & ack) 
 {
   stats_->on_ack_received(ts, ack);
+  loss_calc_.on_ack_received(ts, ack);
+  update_real_stats(ts);
 }
 
 void OracleCongestionControl::set_bw(uint32_t bw_byteps) 
