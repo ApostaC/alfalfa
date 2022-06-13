@@ -77,10 +77,12 @@ bool test_basic_encoder_decoder()
   cerr << "send_timestamp_ms for origin packet is: " << packet.send_timestamp_ms() << endl;
   assert(packet.send_timestamp_ms() == send_ms);
 
+  packet.set_retrans();
   auto str = packet.to_string();
   Packet new_pkt {str};
   cerr << "send_timestamp_ms for rec packet is: " << new_pkt.send_timestamp_ms() << endl;
   assert(new_pkt.send_timestamp_ms() == send_ms);
+  assert(new_pkt.is_retrans() == packet.is_retrans());
   out_green(cerr) << "-------------- PASSED: basic encoder decoder ----------------"; out_normal(cerr) << endl;
   return true;
 }

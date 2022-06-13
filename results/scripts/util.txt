@@ -1,0 +1,10 @@
+../bbr 3-1 	Tail util: 11.78, med util: 36.57
+../bbr-fec 3-1 	Tail util: 14.02, med util: 36.80
+../bbr-svc 3-1 	Tail util: 26.07, med util: 36.56
+../gcc 3-1 	Tail util: 25.58, med util: 37.08
+../gcc-fec 3-1 	Tail util: 33.04, med util: 36.97
+../gcc-svc 3-1 	Tail util: 32.25, med util: 36.75
+../oracle 3-1 	Tail util: 36.23, med util: 37.39
+../salsify 3-1 	Tail util: 33.06, med util: 37.02
+../salsify-fec 3-1 	Tail util: 28.54, med util: 36.98
+../salsify-svc 3-1 	Tail util: 29.35, med util: 36.92

@@ -14,6 +14,25 @@ def read_df(filename):
     df["target_rate"] = df["target_rate"] / 125 # byte per sec --> kbps
     return df
 
+def read_dec_df(filename):
+    """
+    format: <frame_id> <loss> <fec rate> 
+    """
+    df = pd.read_csv(filename, header=None, names=["frame_id", "fec_rate", "loss_rate"]);
+    return df
+
+
+def plot_field_one(field, real_df, legend=None, ylabel=None):
+    fig = plt.figure()
+    plt.plot(real_df["timestamp"], real_df[field], label=legend);
+    plt.xlabel("timestamp (ms)")
+    if ylabel:
+        plt.ylabel(ylabel)
+    plt.title(field)
+    plt.legend()
+    plt.grid()
+    return fig
+
 def plot_field(field, real_df, pred_df, ylabel=None):
     fig = plt.figure()
     plt.plot(real_df["timestamp"], real_df[field], label="real");
@@ -51,58 +70,44 @@ def get_value(df, field, time):
         idx = tmp.idxmin()
     return df.loc[idx, field][:1].item()
 
-if len(sys.argv) != 4:
-    print("Usage: {} <real_csv> <pred_csv> <encoder_stats>".format(sys.argv[0]))
+if len(sys.argv) != 5:
+    print("Usage: {} <real_csv> <pred_csv> <encoder_stats> <decoder_stats>".format(sys.argv[0]))
     exit(0)
 
 pdf_pages = PdfPages('stats.pdf')
 real_df = read_df(sys.argv[1])
 pred_df = read_df(sys.argv[2])
 enc_df = read_df(sys.argv[3])
-enc_df["timestamp"] = enc_df["timestamp"] + 50
-
-# find the error of loss
-#pred_ts = pred_df["timestamp"]
-#real_ts = real_df["timestamp"]
-#def find_good(x, real_ts):
-#    tmp = real_ts.where(real_ts >= x).dropna().sub(x)
-#    if len(tmp) > 0:
-#        return tmp.idxmin()
-#    return real_ts.idxmax()
-#
-#idx = np.fromiter(map(lambda x: find_good(x, real_ts), pred_ts), dtype=int)
-#val = np.fromiter(map(lambda i: real_df.loc[i, "loss_rate"], idx), dtype=float)
-#error_df = pred_df[["loss_rate"]]
-#error_df["real_loss"] = val
-#error_df["error"] = error_df["loss_rate"] - error_df["real_loss"]
-#error_df = error_df.sort_values("error").reset_index(drop=True)
-#
-#print(error_df)
+dec_df = read_dec_df(sys.argv[4])
+print(dec_df)
+enc_df["timestamp"] = enc_df["timestamp"] + 50 # fix the timestamp shift (before frame --> after frame)
 
 
 fig1 = plot_field("pacing_rate", real_df, pred_df, "kbps")
-fig2 = plot_field("target_rate", real_df, pred_df, "kbps")
-fig3 = plot_field("loss_rate", real_df, pred_df, "loss ratio")
-#fig4 = plot_field("loss_rate", pred_df, enc_df, "loss ratio")
+#fig2 = plot_field("target_rate", real_df, pred_df, "kbps")
+fig2 = plot_field_one("target_rate", real_df, "bandwidth", "kbps")
 
-last_ts = 0
-real_losses = []
-fec_rates = []
-for row in enc_df.iterrows():
-    ind, series = row
-    frame_fec = series["loss_rate"]
-    ts = series["timestamp"]
-    if last_ts != ts: 
-        last_ts = ts
-        continue
-    last_ts = ts
-    if frame_fec == 0:
-        continue
-    real_loss = get_value(pred_df, "loss_rate", ts + 500)
-    real_losses += [real_loss]
-    fec_rates += [frame_fec]
-    print(ts, frame_fec, real_loss)
-fig4 = plot_scatter(real_losses, fec_rates, "real loss", "fec rate")
+fig3 = plot_field("loss_rate", real_df, pred_df, "loss ratio")
+fig4 = plot_scatter(dec_df["loss_rate"], dec_df["fec_rate"], "loss rate", "fec rate")
+
+#last_ts = 0
+#real_losses = []
+#fec_rates = []
+#for row in enc_df.iterrows():
+#    ind, series = row
+#    frame_fec = series["loss_rate"]
+#    ts = series["timestamp"]
+#    if last_ts != ts: 
+#        last_ts = ts
+#        continue
+#    last_ts = ts
+#    if frame_fec == 0:
+#        continue
+#    real_loss = get_value(pred_df, "loss_rate", ts + 500)
+#    real_losses += [real_loss]
+#    fec_rates += [frame_fec]
+#    print(ts, frame_fec, real_loss)
+#fig4 = plot_scatter(real_losses, fec_rates, "real loss", "fec rate")
 
 pdf_pages.savefig(fig1)
 pdf_pages.savefig(fig2)

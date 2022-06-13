@@ -3,19 +3,25 @@
 
 #include <vector>
 #include "frame_observer.hh"
+#include "stats.hh"
 
 class DecoderInterface
 {
 protected:
   std::vector<FrameObserverPtr> frame_observers_ {};
+  DecoderStats stats_;
 
 public:
+  DecoderInterface(const std::string & stats_file) : stats_(stats_file) {}
   // main interface
   virtual void incoming_packet(uint32_t timestamp_ms, const Packet &pkt) = 0;
 
   // adding observer
   void add_frame_observer(FrameObserverPtr obs) { frame_observers_.push_back(obs); }
   
+  // get stats
+  const DecoderStats & get_stats() const { return stats_; }
+
   virtual ~DecoderInterface() = default;
 };
 
@@ -33,9 +39,11 @@ private:
   void flush_frame(uint32_t timestamp_ms, const FragmentedFrame &frame);
 
 public:
-  NonBlockingDecoder() = default;
+  NonBlockingDecoder();
+  NonBlockingDecoder(const std::string & stats_file);
 
   virtual void incoming_packet(uint32_t timestamp_ms, const Packet &pkt) override;
+
 };
 
 /**
@@ -51,9 +59,11 @@ private:
   void on_frame_complete(uint32_t timestamp_ms, const FragmentedFrame & frame);
 
 public:
-  BlockingDecoder() = default;
+  BlockingDecoder();
+  BlockingDecoder(const std::string & stats_file);
 
   virtual void incoming_packet(uint32_t timestamp_ms, const Packet & pkt);
+
 };
 
 class SVCDecoder : public DecoderInterface
@@ -68,8 +78,12 @@ private:
   void on_frame_complete(uint32_t timestamp_ms, const SVCFrame & frame);
 
 public: 
-  SVCDecoder(unsigned num_layers) : num_layers_(num_layers) {}
+  SVCDecoder(unsigned num_layers, const std::string & stats_file) 
+    : DecoderInterface(stats_file), num_layers_(num_layers) {}
+  SVCDecoder(unsigned num_layers) : DecoderInterface("/tmp/decoder.csv"), num_layers_(num_layers) {}
+
   virtual void incoming_packet(uint32_t timestamp_ms, const Packet & pkt);
+
 };
 
 #endif

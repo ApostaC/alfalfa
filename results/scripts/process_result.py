@@ -9,6 +9,7 @@ Usage: ./process_result.py <encoder output> <decoder output>
 """
 
 MPEG_MIN_QP = 10
+LAMBDA = 50
 
 def PSNR(Y1_raw, Y1_com):
     Y1_com = Y1_com.to(Y1_raw.device)
@@ -128,8 +129,8 @@ class BaseMPEGModel:
 model = BaseMPEGModel()
 model.load_video_profile("/home/aposta/projects/alfalfa/test/-00nar1nEPc_000033_000043-mpeg.csv")
 
-if len(sys.argv) != 3:
-    print("Usage: {} <encoder output> <decoder output>".format(sys.argv[0]))
+if len(sys.argv) != 4:
+    print("Usage: {} <encoder output> <decoder output> < util | psnr >".format(sys.argv[0]))
     exit(0)
 
 enc_df = pd.read_csv(sys.argv[1], header=None, names=["frame_id", "enc_ts", "size"])
@@ -143,8 +144,11 @@ t3["latency"] = t3["dec_ts"] - t3["enc_ts"]
 
 psnrs = model.fit_trace(enc_df["size"])[:len(t3)]
 t3["psnr"] = psnrs
-t3["util"] = t3["psnr"] - t3["latency"] / 200
-print("\tTail latency: {:.1f}, AVG PSNR = {:.2f}".format(t3["latency"].quantile(0.95), np.mean(psnrs)))
+t3["util"] = t3["psnr"] - t3["latency"] / LAMBDA
+if sys.argv[3] == "psnr":
+    print("\tTail latency: {:.1f}, AVG PSNR = {:.2f}".format(t3["latency"].quantile(0.95), np.mean(psnrs)))
+else:
+    print("\tTail util: {:.2f}, med util: {:.2f}".format(t3["util"].quantile(0.05), t3["util"].quantile(0.5)))
 #print("AVG PSNR = ", np.mean(psnrs))
 #print("95% Latency = ", t3["latency"].quantile(0.95))
 #print("AVG SIZE = ", np.mean(enc_df["size"]))

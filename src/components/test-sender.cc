@@ -149,18 +149,6 @@ int main(int argc, char *argv[])
   auto & encoder = get_codec(j["codec"], j["fec_rate"], fps);
   auto & cc = get_cc(j["cc"], bw_ctrl, fps);
   auto & rtx_mgr = get_rtx(j["codec"]);
-  //BasicEncoder encoder(500 * 125, fps);
-  //encoder.set_protection_overhead(std::stod(argv[3]));
-  //double fec_rate = std::stod(argv[3]);
-  //encoder.set_fec_rate(255u * fec_rate);
-
-  //SalsifyCongestionControl cc(100, fps);
-  //GCCMinus cc;
-  //BBRMinus cc;
-  //cc.set_initial_rate_estimation(bw_ctrl.init_bandwidth_byteps() * 0.6);
-  //OracleCongestionControl & orac_cc = bw_ctrl.get_oracle_cc();
-
-  //RTXManager rtx_mgr;
 
   encode_time_recorder = std::make_shared<CompleteFrameObserver>();
   encoder.add_frame_observer(encode_time_recorder);
@@ -173,6 +161,7 @@ int main(int argc, char *argv[])
 
   auto sender = std::make_shared<TransSender>(Address(argv[1], argv[2]), fps, std::ref(cc), std::ref(encoder), std::ref(rtx_mgr));
   cc.add_observer(sender);
+  sender->set_queue_length(static_cast<uint32_t>(j["queue_length_ms"]));
   //auto sender = std::make_shared<TransSender>(Address(argv[1], argv[2]), fps, std::ref(orac_cc), std::ref(encoder), std::ref(rtx_mgr));
   //orac_cc.add_observer(sender);
 

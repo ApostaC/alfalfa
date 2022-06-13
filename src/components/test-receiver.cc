@@ -14,6 +14,7 @@ namespace {
   shared_ptr<CompleteFrameObserver> decode_time_recorder {};
   string config_file {};
   string output_csv {};
+  string decoder_stats_csv {};
 } // anonymous namespace for global variables
 
 void print_usage(char *argv[])
@@ -41,8 +42,8 @@ void sigint_handler(int signum)
 
 DecoderInterface & get_codec(const std::string & name)
 {
-  static BlockingDecoder basic_decoder;
-  static SVCDecoder svc_decoder(3);
+  static BlockingDecoder basic_decoder(decoder_stats_csv);
+  static SVCDecoder svc_decoder(3, decoder_stats_csv);
   
   if (name == "svc") {
     return std::ref(svc_decoder);
@@ -71,6 +72,7 @@ int main(int argc, char *argv[])
   fconfig >> j;
 
   output_csv = string(j["output_folder"]) + string(j["decoder_output"]);
+  decoder_stats_csv = string(j["output_folder"]) + string(j["decoder_stats"]);
 
   auto & decoder = get_codec(j["codec"]);
   decode_time_recorder = std::make_shared<CompleteFrameObserver>();
@@ -83,6 +85,7 @@ int main(int argc, char *argv[])
   cout << "Starting receiver!" << endl;
   uint32_t limit_ms = -1;
   receiver->start(limit_ms);
+  decoder.get_stats().dump();
   dump_output_time();
   return 0;
 }

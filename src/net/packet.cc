@@ -107,7 +107,8 @@ Packet::Packet( const Chunk & str )
     svc_layer_no_( str(32, 2).le16() ),
     svc_layer_offset_( str(34, 2).le16() ),
     svc_layer_size_( str(36, 2).le16() ),
-    payload_( str( 38 ).to_string() )
+    is_retrans_( str(38, 2).le16() ),
+    payload_( str( 40 ).to_string() )
 {
   if ( fragment_no_ >= fragments_in_this_frame_ ) {
     throw runtime_error( "invalid packet: fragment_no_ >= fragments_in_this_frame" );
@@ -153,7 +154,8 @@ string Packet::to_string() const
        + put_header_field( control_signal_ )
        + put_header_field( svc_layer_no_ )
        + put_header_field( svc_layer_offset_ )
-       + put_header_field( svc_layer_size_ )
+       + put_header_field( svc_layer_size_ ) 
+       + put_header_field( static_cast<uint16_t>(is_retrans_) )
        + payload_;
 }
 

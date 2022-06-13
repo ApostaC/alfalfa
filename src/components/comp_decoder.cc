@@ -3,6 +3,16 @@
 
 using namespace std;
 
+NonBlockingDecoder::NonBlockingDecoder(const string & stats_file)
+  : DecoderInterface(stats_file)
+{
+}
+
+NonBlockingDecoder::NonBlockingDecoder()
+  : NonBlockingDecoder("/tmp/decoder.csv") 
+{
+}
+
 void NonBlockingDecoder::flush_frame(uint32_t timestamp_ms, const FragmentedFrame & frame)
 {
   for(auto obs : frame_observers_) {
@@ -17,6 +27,9 @@ void NonBlockingDecoder::flush_frame(uint32_t timestamp_ms, const FragmentedFram
 
 void NonBlockingDecoder::incoming_packet(uint32_t timestamp_ms, const Packet & pkt)
 {
+  // update stats
+  stats_.on_packet_received(timestamp_ms, pkt);
+
   // from a early frame, skip
   if (pkt.frame_no() < expected_frame_no_) {
     //cerr << "Received a packet for old frame " << pkt.frame_no() << ", skip!" << endl;
@@ -59,6 +72,16 @@ void NonBlockingDecoder::incoming_packet(uint32_t timestamp_ms, const Packet & p
   
 }
 
+BlockingDecoder::BlockingDecoder(const string & stats_file) 
+  : DecoderInterface(stats_file) 
+{
+}
+
+BlockingDecoder::BlockingDecoder() 
+  : BlockingDecoder("/tmp/decoder.csv")
+{
+}
+
 void BlockingDecoder::on_frame_complete(uint32_t timestamp_ms, const FragmentedFrame & frame)
 {
   // erase all the previous partial frames
@@ -81,6 +104,9 @@ void BlockingDecoder::on_frame_complete(uint32_t timestamp_ms, const FragmentedF
 
 void BlockingDecoder::incoming_packet(uint32_t timestamp_ms, const Packet & pkt)
 {
+  // update stats
+  stats_.on_packet_received(timestamp_ms, pkt);
+
   auto frame_no = pkt.frame_no();
 
   // an outdated packet is received, skip
@@ -136,6 +162,9 @@ void SVCDecoder::on_frame_complete(uint32_t timestamp_ms, const SVCFrame & frame
 
 void SVCDecoder::incoming_packet(uint32_t timestamp_ms, const Packet & pkt)
 {
+  // update stats
+  stats_.on_packet_received(timestamp_ms, pkt);
+
   /* if it's an outdated frame, we only need it to be decodable,
    * if it's an new frame, we expected it to be complete!
    */

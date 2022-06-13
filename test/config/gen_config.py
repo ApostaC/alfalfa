@@ -3,6 +3,7 @@ import os, sys
 import json
 
 LENGTH = 40000
+QUEUE_LEN_MS = 100
 
 TRACE_DIR = "/home/aposta/projects/alfalfa/test/fcc_for_emulation"
 TRACE_ID = [1,2,3,4,5]
@@ -29,11 +30,14 @@ def construct_json_object(config, trace, key, postfix):
             "cc": cc,
             "fec_rate": fec,
             "length_ms": LENGTH,
+
+            "queue_length_ms": QUEUE_LEN_MS,
         
             "output_folder": f"/home/aposta/projects/alfalfa/results/{key}/",
             "encoder_output": f"encoder-{postfix}.csv",
             "decoder_output": f"decoder-{postfix}.csv",
             "encoder_stats": f"encstat-{postfix}.csv",
+            "decoder_stats": f"decstat-{postfix}.csv",
             "real_stats": f"real-{postfix}.csv",
             "pred_stats": f"pred-{postfix}.csv"
         }

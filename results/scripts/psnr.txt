@@ -1,0 +1,10 @@
+../bbr 3-1 	Tail latency: 1246.4, AVG PSNR = 38.70
+../bbr-fec 3-1 	Tail latency: 1029.9, AVG PSNR = 38.51
+../bbr-svc 3-1 	Tail latency: 581.3, AVG PSNR = 38.49
+../gcc 3-1 	Tail latency: 552.9, AVG PSNR = 38.72
+../gcc-fec 3-1 	Tail latency: 263.2, AVG PSNR = 38.60
+../gcc-svc 3-1 	Tail latency: 251.1, AVG PSNR = 38.40
+../oracle 3-1 	Tail latency: 89.0, AVG PSNR = 39.03
+../salsify 3-1 	Tail latency: 135.0, AVG PSNR = 38.78
+../salsify-fec 3-1 	Tail latency: 255.1, AVG PSNR = 38.40
+../salsify-svc 3-1 	Tail latency: 230.2, AVG PSNR = 38.14

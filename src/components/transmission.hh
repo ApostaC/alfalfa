@@ -152,6 +152,7 @@ private:
   std::deque<Packet> rtx_queue_{};
 
   std::deque<Packet> mock_nic_{};
+  uint32_t queue_len_ms_ {0};
 
 private:
   /* called when checking poller, so need to check real queue */
@@ -177,6 +178,9 @@ public:
 
   // implements CongestionControlObserver
   void post_updates(uint32_t sending_rate_byteps, uint32_t target_bitrate_byteps, double loss_rate) override; 
+
+  // configuration
+  void set_queue_length(uint32_t queue_len_ms) { queue_len_ms_ = queue_len_ms; }
 };
 
 

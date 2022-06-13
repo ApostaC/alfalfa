@@ -48,3 +48,79 @@ void StatsRecorder::dump(bool relative_time)
          << "," << rec.target_rate_byteps << "," << rec.loss_rate << endl;
   }
 }
+
+DecoderStats::DecoderStats(const string & outfile)
+  : outfile_(outfile)
+{
+}
+
+void DecoderStats::on_packet_received(uint32_t, const Packet & pkt)
+{
+  /**
+   * when a packet arrives, there are 4 possible stats:
+   *  found in normal, found in rtx: INVALID
+   *  found in normal, not found in rtx: SKIP
+   *  not found in normal, found in rtx: SKIP 
+   *  not foudn in normal, not found in rtx: insert
+   */
+  auto frame_id = pkt.frame_no();
+  auto frag_id = pkt.fragment_no();
+  auto in_normal = normal_pkts_[frame_id].count(frag_id);
+  auto in_rtx = rtx_pkts_[frame_id].count(frag_id);
+
+  if (in_normal and in_rtx) {
+    cerr << "Warning: packet is found in both normal and rtx!" << endl;
+  }
+
+  if (not in_normal and not in_rtx) {
+    if (pkt.is_retrans()) {
+      rtx_pkts_[frame_id].insert(frag_id);
+    }
+    else {
+      normal_pkts_[frame_id].insert(frag_id);
+    }
+  }
+  
+  if (fec_ratio_.count(frame_id) == 0) {
+    double fec_ratio = pkt.fec_rate() / 255.0;
+    double loss_tolerance = fec_ratio / (1 + fec_ratio);
+    fec_ratio_[frame_id] = loss_tolerance;
+  }
+}
+
+void DecoderStats::dump() const
+{
+  ofstream fout(outfile_);
+  if (!fout) {
+    throw runtime_error("DecoderStats::dump(): cannot open file to write, file name is " + outfile_);
+  }
+
+  cerr << "HERE: dumping decoder stats to " << outfile_ << endl;
+
+  /* get all frame_ids */
+  std::set<uint32_t> frame_ids;
+  std::map<uint32_t, double> loss_rates;
+  for (auto & ent : normal_pkts_) {
+    frame_ids.insert(ent.first);
+  }
+  for (auto & ent : rtx_pkts_) {
+    frame_ids.insert(ent.first);
+  }
+
+  for (uint32_t frame_id : frame_ids) {
+    auto normal_cnt = 0;
+    auto rtx_cnt = 0;
+    if (normal_pkts_.count(frame_id)) {
+      normal_cnt = normal_pkts_.at(frame_id).size();
+    }
+    if (rtx_pkts_.count(frame_id)) {
+      rtx_cnt = rtx_pkts_.at(frame_id).size();
+    }
+
+    loss_rates[frame_id] = 1. * rtx_cnt / (rtx_cnt + normal_cnt);
+  }
+
+  for (auto frame_id : frame_ids) {
+    fout << frame_id << "," << fec_ratio_.at(frame_id) << "," << loss_rates[frame_id] << endl;
+  }
+}

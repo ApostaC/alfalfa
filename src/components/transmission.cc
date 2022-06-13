@@ -269,16 +269,17 @@ TransSender::TransSender(const Address & peer_addr, uint32_t fps,
 
 bool TransSender::real_send_packet(uint32_t now_ms)
 {
-  if (not mock_nic_.empty()) {
-    auto & packet = mock_nic_.front();
-    auto ret = socket_.send(packet.to_string());
-    (void)now_ms;
-    //cerr << "[HERE]: send packet " <<  packet.frame_no() << "," << packet.fragment_no() 
-    //     << " from " << now_ms << " to " << timestamp_ms() << endl;
-    mock_nic_.pop_front();
-    return ret;
+  if (mock_nic_.empty()) {
+    return false;
   }
-  return false;
+
+  auto & packet = mock_nic_.front();
+  bool ret = true;
+  if (queue_len_ms_ == 0 or now_ms - packet.send_timestamp_ms() <= queue_len_ms_) {
+    ret = socket_.send(packet.to_string());
+  }
+  mock_nic_.pop_front();
+  return ret;
 }
 
 void TransSender::mock_send_packet(uint32_t now_ms)
